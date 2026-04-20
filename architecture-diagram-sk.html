@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kael — architektúra systému</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+
+    .container {
+      max-width: 1500px;
+      margin: 0 auto;
+    }
+
+    .header { margin-bottom: 2rem; }
+
+    .header-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .pulse-dot {
+      width: 12px;
+      height: 12px;
+      background: #22d3ee;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 0.875rem;
+      margin-left: 1.75rem;
+    }
+
+    h2 {
+      font-size: 1.125rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-top: 2.5rem;
+      margin-bottom: 0.75rem;
+      color: #22d3ee;
+    }
+
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    svg { width: 100%; min-width: 1200px; display: block; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .card-dot.cyan    { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet  { background: #a78bfa; }
+    .card-dot.amber   { background: #fbbf24; }
+    .card-dot.rose    { background: #fb7185; }
+    .card-dot.orange  { background: #fb923c; }
+    .card-dot.slate   { background: #94a3b8; }
+
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+
+    .card ul {
+      list-style: none;
+      color: #94a3b8;
+      font-size: 0.75rem;
+    }
+
+    .card li { margin-bottom: 0.375rem; line-height: 1.55; }
+
+    .card code {
+      background: #020617;
+      border: 1px solid #1e293b;
+      color: #fbbf24;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 0.7rem;
+    }
+
+    /* Glossary — two-column grid of component cards with source badges */
+    .glossary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .gloss-card {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid #1e293b;
+      border-left-width: 4px;
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+    }
+
+    .gloss-name {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: white;
+      margin-bottom: 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .gloss-desc {
+      font-size: 0.72rem;
+      color: #cbd5e1;
+      line-height: 1.55;
+    }
+
+    .src-tag {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+
+    .src-anthropic   { background: rgba(8,51,68,0.6);   color: #22d3ee; border: 1px solid #22d3ee; }
+    .src-discord     { background: rgba(76,29,149,0.5); color: #a78bfa; border: 1px solid #a78bfa; }
+    .src-obsidian    { background: rgba(6,78,59,0.5);   color: #34d399; border: 1px solid #34d399; }
+    .src-github      { background: rgba(30,41,59,0.6);  color: #94a3b8; border: 1px solid #94a3b8; }
+    .src-own         { background: rgba(120,53,15,0.5); color: #fbbf24; border: 1px solid #fbbf24; }
+    .src-third       { background: rgba(136,19,55,0.5); color: #fb7185; border: 1px solid #fb7185; }
+    .src-tool        { background: rgba(251,146,60,0.4); color: #fb923c; border: 1px solid #fb923c; }
+
+    .gl-anthropic { border-left-color: #22d3ee; }
+    .gl-discord   { border-left-color: #a78bfa; }
+    .gl-obsidian  { border-left-color: #34d399; }
+    .gl-github    { border-left-color: #94a3b8; }
+    .gl-own       { border-left-color: #fbbf24; }
+    .gl-third     { border-left-color: #fb7185; }
+    .gl-tool      { border-left-color: #fb923c; }
+
+    .footer {
+      text-align: center;
+      margin-top: 1.5rem;
+      color: #475569;
+      font-size: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>Kael — architektúra systému</h1>
+      </div>
+      <p class="subtitle">Osobný AI asistent postavený nad Claude Code · prehľad pre tata · 2026-04-19</p>
+    </div>
+
+    <!-- =================================================================
+         MAIN DIAGRAM
+         ================================================================= -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1500 1240" xmlns="http://www.w3.org/2000/svg">
+
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+          </marker>
+          <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee"/>
+          </marker>
+          <marker id="arrowhead-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24"/>
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+
+        <!-- =================================================================
+             ARROWS (drawn FIRST so they render behind component boxes)
+             ================================================================= -->
+
+        <!-- Miro → Discord -->
+        <line x1="750" y1="110" x2="750" y2="168" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="770" y="145" fill="#94a3b8" font-size="9">píše správy</text>
+
+        <!-- Discord → Kael CLI -->
+        <line x1="750" y1="258" x2="750" y2="316" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="770" y="295" fill="#94a3b8" font-size="9">chat → MCP → Claude</text>
+
+        <!-- CLAUDE.md → Kael CLI (constitution loaded at session start) -->
+        <path d="M 240 258 Q 240 290, 360 316" fill="none" stroke="#fbbf24" stroke-width="1.8" stroke-dasharray="5,4" marker-end="url(#arrowhead-amber)"/>
+        <text x="150" y="295" fill="#fbbf24" font-size="9">načítaný pri štarte</text>
+
+        <!-- Kael CLI → Claude Opus -->
+        <line x1="1050" y1="400" x2="1208" y2="400" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead-cyan)"/>
+        <text x="1080" y="392" fill="#22d3ee" font-size="9">volá LLM</text>
+
+        <!-- Kael CLI → Auto-pamäť -->
+        <line x1="500" y1="520" x2="270" y2="578" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="330" y="540" fill="#94a3b8" font-size="9">čítať + zapisovať</text>
+
+        <!-- Kael CLI → Smart Connections -->
+        <line x1="800" y1="520" x2="1120" y2="578" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="960" y="540" fill="#94a3b8" font-size="9">semantic_search</text>
+
+        <!-- Smart Connections → KaelVault -->
+        <line x1="1120" y1="660" x2="900" y2="660" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="970" y="652" fill="#34d399" font-size="9">vyhľadá poznámky</text>
+
+        <!-- session transcript icon → Dreamer -->
+        <line x1="50" y1="650" x2="180" y2="748" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrowhead)"/>
+        <text x="60" y="707" fill="#94a3b8" font-size="8">transkripty</text>
+
+        <!-- Dreamer → KaelVault -->
+        <path d="M 310 760 Q 540 700, 700 660" fill="none" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead-amber)"/>
+        <text x="430" y="715" fill="#fbbf24" font-size="9">zapíše poznámky</text>
+
+        <!-- Auto-commit cron → GitHub (EMPHASIZED backup flow) -->
+        <path d="M 370 930 Q 900 910, 1260 930" fill="none" stroke="#fbbf24" stroke-width="2.2" stroke-dasharray="6,3" marker-end="url(#arrowhead-amber)"/>
+        <text x="820" y="900" fill="#fbbf24" font-size="10" font-weight="600">git push každých 30 min — záloha v cloude</text>
+
+        <!-- =================================================================
+             COMPONENTS — ROW 1: Používateľ
+             ================================================================= -->
+
+        <!-- Miro (user) -->
+        <rect x="650" y="50" width="200" height="60" rx="6" fill="#0f172a"/>
+        <rect x="650" y="50" width="200" height="60" rx="6" fill="rgba(30, 41, 59, 0.55)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="750" y="77" fill="white" font-size="13" font-weight="700" text-anchor="middle">Používateľ — Miro</text>
+        <text x="750" y="94" fill="#94a3b8" font-size="9" text-anchor="middle">PC · mobil · SSH cez Tailscale</text>
+
+        <!-- =================================================================
+             COMPONENTS — ROW 2: CLAUDE.md + Discord
+             ================================================================= -->
+
+        <!-- CLAUDE.md — the constitution file -->
+        <rect x="30" y="168" width="420" height="90" rx="6" fill="#0f172a"/>
+        <rect x="30" y="168" width="420" height="90" rx="6" fill="rgba(120, 53, 15, 0.35)" stroke="#fbbf24" stroke-width="2"/>
+        <text x="240" y="193" fill="white" font-size="13" font-weight="700" text-anchor="middle">CLAUDE.md — základné pravidlá</text>
+        <text x="240" y="210" fill="#94a3b8" font-size="9" text-anchor="middle">~/CLAUDE.md · permanentné behaviorálne pravidlá</text>
+        <text x="50" y="229" fill="#94a3b8" font-size="9">• identita (kto je Kael, kto je Miro, trust hierarchia)</text>
+        <text x="50" y="243" fill="#94a3b8" font-size="9">• ako komunikovať · ako pracovať s pamäťou · security</text>
+        <text x="240" y="255" fill="#fbbf24" font-size="8" font-style="italic" text-anchor="middle">⚡ hlavný súbor — načítaný automaticky pri každej session</text>
+
+        <!-- Discord -->
+        <rect x="470" y="168" width="560" height="90" rx="6" fill="#0f172a"/>
+        <rect x="470" y="168" width="560" height="90" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="750" y="193" fill="white" font-size="13" font-weight="700" text-anchor="middle">Discord — chat kanál</text>
+        <text x="750" y="211" fill="#94a3b8" font-size="9" text-anchor="middle">bot "MaoTanx" · plugin:discord:discord (MCP)</text>
+        <text x="750" y="227" fill="#94a3b8" font-size="9" text-anchor="middle">správy idú z Miroa do Kael CLI cez MCP plugin</text>
+        <text x="750" y="247" fill="#a78bfa" font-size="8" font-style="italic" text-anchor="middle">primárny komunikačný kanál</text>
+
+        <!-- =================================================================
+             COMPONENTS — ROW 3: Kael CLI + Claude Opus
+             ================================================================= -->
+
+        <!-- Kael CLI (main agent) -->
+        <rect x="360" y="316" width="790" height="200" rx="6" fill="#0f172a"/>
+        <rect x="360" y="316" width="790" height="200" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="755" y="341" fill="white" font-size="14" font-weight="700" text-anchor="middle">Kael CLI — hlavný agent</text>
+        <text x="755" y="358" fill="#94a3b8" font-size="9" text-anchor="middle">Claude Code (Anthropic) · terminálová session · plný prístup k nástrojom</text>
+
+        <!-- Sub-component: Skilly + agenti -->
+        <rect x="385" y="375" width="230" height="60" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="500" y="396" fill="white" font-size="11" font-weight="600" text-anchor="middle">Skilly + agenti</text>
+        <text x="500" y="412" fill="#94a3b8" font-size="8" text-anchor="middle">vlastné + Superpowers plugin</text>
+        <text x="500" y="426" fill="#94a3b8" font-size="8" text-anchor="middle">+ Agent tool na dispatch</text>
+
+        <!-- Sub-component: MCP servery -->
+        <rect x="640" y="375" width="230" height="60" rx="6" fill="rgba(30, 41, 59, 0.55)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="755" y="396" fill="white" font-size="11" font-weight="600" text-anchor="middle">MCP servery</text>
+        <text x="755" y="412" fill="#94a3b8" font-size="8" text-anchor="middle">Smart Connections · Discord</text>
+        <text x="755" y="426" fill="#94a3b8" font-size="8" text-anchor="middle">Chrome DevTools · a ďalšie</text>
+
+        <!-- Sub-component: Štandardné nástroje -->
+        <rect x="895" y="375" width="230" height="60" rx="6" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="1010" y="396" fill="white" font-size="11" font-weight="600" text-anchor="middle">Štandardné nástroje</text>
+        <text x="1010" y="412" fill="#94a3b8" font-size="8" text-anchor="middle">Read · Write · Edit · Bash</text>
+        <text x="1010" y="426" fill="#94a3b8" font-size="8" text-anchor="middle">Grep · Glob · WebFetch/Search</text>
+
+        <!-- Sub-component: Hook -->
+        <rect x="385" y="450" width="355" height="50" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="562" y="469" fill="white" font-size="11" font-weight="600" text-anchor="middle">Hook (Stop): discord_reply_check.py</text>
+        <text x="562" y="485" fill="#94a3b8" font-size="8" text-anchor="middle">jediný aktívny hook — donúti Claude vždy odpovedať na Discord</text>
+
+        <!-- Sub-component: Subagent dispatch -->
+        <rect x="765" y="450" width="360" height="50" rx="6" fill="rgba(8, 51, 68, 0.35)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="945" y="469" fill="white" font-size="11" font-weight="600" text-anchor="middle">Spúšťanie subagentov</text>
+        <text x="945" y="485" fill="#94a3b8" font-size="8" text-anchor="middle">Agent tool: Plan · Explore · general-purpose · vlastní agenti</text>
+
+        <text x="755" y="510" fill="#64748b" font-size="9" font-style="italic" text-anchor="middle">spúšťanie:  claude</text>
+
+        <!-- Claude Opus 4.7 (the brain) -->
+        <rect x="1208" y="340" width="250" height="130" rx="6" fill="#0f172a"/>
+        <rect x="1208" y="340" width="250" height="130" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="1333" y="367" fill="white" font-size="13" font-weight="700" text-anchor="middle">Claude Opus 4.7</text>
+        <text x="1333" y="383" fill="#94a3b8" font-size="9" text-anchor="middle">mozog (Anthropic LLM)</text>
+        <line x1="1225" y1="395" x2="1441" y2="395" stroke="#1e293b" stroke-width="1"/>
+        <text x="1225" y="411" fill="#94a3b8" font-size="9">• každá správa ide sem</text>
+        <text x="1225" y="425" fill="#94a3b8" font-size="9">• prístup cez Max-plán</text>
+        <text x="1225" y="439" fill="#94a3b8" font-size="9">• prompt caching aktívny</text>
+        <text x="1225" y="460" fill="#22d3ee" font-size="9" font-style="italic">(žiadne per-token platenie)</text>
+
+        <!-- =================================================================
+             COMPONENTS — ROW 4: Memory layer
+             ================================================================= -->
+
+        <!-- Session transcripts source (small icon, left of Auto-pamäť) -->
+        <rect x="30" y="578" width="70" height="70" rx="4" fill="#0f172a"/>
+        <rect x="30" y="578" width="70" height="70" rx="4" fill="rgba(8, 51, 68, 0.3)" stroke="#22d3ee" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="65" y="603" fill="#22d3ee" font-size="8" font-weight="600" text-anchor="middle">session</text>
+        <text x="65" y="615" fill="#22d3ee" font-size="8" text-anchor="middle">.jsonl</text>
+        <text x="65" y="633" fill="#94a3b8" font-size="7" text-anchor="middle">transkripty</text>
+        <text x="65" y="644" fill="#94a3b8" font-size="7" text-anchor="middle">na disku</text>
+
+        <!-- Auto-pamäť -->
+        <rect x="130" y="578" width="320" height="130" rx="6" fill="#0f172a"/>
+        <rect x="130" y="578" width="320" height="130" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="290" y="601" fill="white" font-size="12" font-weight="700" text-anchor="middle">Auto-pamäť</text>
+        <text x="290" y="617" fill="#94a3b8" font-size="8" text-anchor="middle">~/.claude/projects/-Users-donpiano/memory/</text>
+        <line x1="150" y1="627" x2="430" y2="627" stroke="#1e293b" stroke-width="1"/>
+        <text x="150" y="642" fill="#94a3b8" font-size="8">• ~35 malých markdown súborov</text>
+        <text x="150" y="656" fill="#94a3b8" font-size="8">• načítané automaticky na začiatku session</text>
+        <text x="150" y="670" fill="#94a3b8" font-size="8">• typy: user · feedback · reference · project</text>
+        <text x="150" y="684" fill="#94a3b8" font-size="8">• píše ich Claude počas rozhovoru</text>
+        <text x="150" y="700" fill="#fbbf24" font-size="8" font-style="italic">Rola: osobnosť · pravidlá · ľudia · preferencie</text>
+
+        <!-- KaelVault -->
+        <rect x="480" y="578" width="400" height="130" rx="6" fill="#0f172a"/>
+        <rect x="480" y="578" width="400" height="130" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="680" y="601" fill="white" font-size="12" font-weight="700" text-anchor="middle">KaelVault — Obsidian vault</text>
+        <text x="680" y="617" fill="#94a3b8" font-size="8" text-anchor="middle">~/KaelVault/ · git repo github.com/MaoTanx/KaelVault (súkromný)</text>
+        <line x1="500" y1="627" x2="860" y2="627" stroke="#1e293b" stroke-width="1"/>
+        <text x="500" y="642" fill="#94a3b8" font-size="8">• priečinky: Daily/ · People/ · Projects/ · System/</text>
+        <text x="500" y="656" fill="#94a3b8" font-size="8">• stovky markdown súborov — dlhodobé vedomosti</text>
+        <text x="500" y="670" fill="#94a3b8" font-size="8">• NIE načítaný celý — prehľadávaný cez Smart Connections</text>
+        <text x="500" y="684" fill="#94a3b8" font-size="8">• píše ho dreamer (agent) asynchrónne</text>
+        <text x="500" y="700" fill="#34d399" font-size="8" font-style="italic">Rola: archív · dlhodobá pamäť · prezerateľný v Obsidian app</text>
+
+        <!-- Smart Connections MCP -->
+        <rect x="910" y="578" width="380" height="130" rx="6" fill="#0f172a"/>
+        <rect x="910" y="578" width="380" height="130" rx="6" fill="rgba(6, 78, 59, 0.3)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="1100" y="601" fill="white" font-size="12" font-weight="700" text-anchor="middle">Smart Connections MCP</text>
+        <text x="1100" y="617" fill="#94a3b8" font-size="8" text-anchor="middle">plugin pre Obsidian · beží ako MCP server</text>
+        <line x1="930" y1="627" x2="1270" y2="627" stroke="#1e293b" stroke-width="1"/>
+        <text x="930" y="642" fill="#94a3b8" font-size="8">• sémantické vyhľadávanie vo vault-e</text>
+        <text x="930" y="656" fill="#94a3b8" font-size="8">• embeddings model: bge-micro-v2</text>
+        <text x="930" y="670" fill="#94a3b8" font-size="8">• nástroje: semantic_search · find_related</text>
+        <text x="930" y="684" fill="#94a3b8" font-size="8">   · get_context_blocks</text>
+        <text x="930" y="700" fill="#34d399" font-size="8" font-style="italic">Rola: most medzi Claudom a vault-om</text>
+
+        <!-- =================================================================
+             COMPONENTS — ROW 5: Agenti + Skilly
+             ================================================================= -->
+
+        <!-- Dreamer -->
+        <rect x="30" y="748" width="280" height="130" rx="6" fill="#0f172a"/>
+        <rect x="30" y="748" width="280" height="130" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="170" y="771" fill="white" font-size="12" font-weight="700" text-anchor="middle">Dreamer</text>
+        <text x="170" y="787" fill="#94a3b8" font-size="8" text-anchor="middle">~/.claude/agents/dreamer.md</text>
+        <line x1="50" y1="797" x2="290" y2="797" stroke="#1e293b" stroke-width="1"/>
+        <text x="50" y="812" fill="#94a3b8" font-size="8">• spracuje transkripty rozhovorov</text>
+        <text x="50" y="826" fill="#94a3b8" font-size="8">• aktualizuje zápisky vo vault-e</text>
+        <text x="50" y="840" fill="#94a3b8" font-size="8">• každú hodinu (launchd :43)</text>
+        <text x="50" y="854" fill="#94a3b8" font-size="8">• model: Claude Sonnet</text>
+        <text x="50" y="870" fill="#fbbf24" font-size="8" font-style="italic">Rola: rozhovory → vault</text>
+
+        <!-- Deep-dreamer -->
+        <rect x="340" y="748" width="280" height="130" rx="6" fill="#0f172a"/>
+        <rect x="340" y="748" width="280" height="130" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="480" y="771" fill="white" font-size="12" font-weight="700" text-anchor="middle">Deep-dreamer</text>
+        <text x="480" y="787" fill="#94a3b8" font-size="8" text-anchor="middle">~/.claude/agents/deep-dreamer.md</text>
+        <line x1="360" y1="797" x2="600" y2="797" stroke="#1e293b" stroke-width="1"/>
+        <text x="360" y="812" fill="#94a3b8" font-size="8">• denná údržba vault-u o 03:30</text>
+        <text x="360" y="826" fill="#94a3b8" font-size="8">• zlučuje duplikáty</text>
+        <text x="360" y="840" fill="#94a3b8" font-size="8">• opravuje pokazené odkazy</text>
+        <text x="360" y="854" fill="#94a3b8" font-size="8">• čistí MEMORY.md index</text>
+        <text x="360" y="870" fill="#fbbf24" font-size="8" font-style="italic">Rola: upratovačka vault-u</text>
+
+        <!-- Other agents -->
+        <rect x="650" y="748" width="320" height="130" rx="6" fill="#0f172a"/>
+        <rect x="650" y="748" width="320" height="130" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="810" y="771" fill="white" font-size="12" font-weight="700" text-anchor="middle">Ďalší agenti</text>
+        <text x="810" y="787" fill="#94a3b8" font-size="8" text-anchor="middle">~/.claude/agents/ (na požiadanie)</text>
+        <line x1="670" y1="797" x2="950" y2="797" stroke="#1e293b" stroke-width="1"/>
+        <text x="670" y="812" fill="#94a3b8" font-size="8">• research-explorer — hlboký prieskum</text>
+        <text x="670" y="826" fill="#94a3b8" font-size="8">   (kódu, webu, API, dokumentácie)</text>
+        <text x="670" y="840" fill="#94a3b8" font-size="8">• + špecializovaní pre Mirove projekty</text>
+        <text x="670" y="854" fill="#94a3b8" font-size="8">• Claude ich volá cez Agent tool</text>
+        <text x="670" y="870" fill="#fbbf24" font-size="8" font-style="italic">Rola: špecializácia pre zložité úlohy</text>
+
+        <!-- Skilly + Plugins -->
+        <rect x="1000" y="748" width="320" height="130" rx="6" fill="#0f172a"/>
+        <rect x="1000" y="748" width="320" height="130" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="1160" y="771" fill="white" font-size="12" font-weight="700" text-anchor="middle">Skilly + pluginy</text>
+        <text x="1160" y="787" fill="#94a3b8" font-size="8" text-anchor="middle">~/.claude/skills/ · plugins/</text>
+        <line x1="1020" y1="797" x2="1300" y2="797" stroke="#1e293b" stroke-width="1"/>
+        <text x="1020" y="812" fill="#94a3b8" font-size="8">• vlastné skilly: ultrareview-local,</text>
+        <text x="1020" y="826" fill="#94a3b8" font-size="8">   architecture-diagram (tento!)</text>
+        <text x="1020" y="840" fill="#94a3b8" font-size="8">• Superpowers plugin (Anthropic mkt):</text>
+        <text x="1020" y="854" fill="#94a3b8" font-size="8">   brainstorming · writing-plans · TDD</text>
+        <text x="1020" y="870" fill="#fbbf24" font-size="8" font-style="italic">Rola: opakovateľné pracovné postupy</text>
+
+        <!-- =================================================================
+             COMPONENTS — ROW 6: Cron-y + GitHub backup
+             ================================================================= -->
+
+        <!-- Plánovače -->
+        <rect x="30" y="920" width="840" height="150" rx="6" fill="#0f172a"/>
+        <rect x="30" y="920" width="840" height="150" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="450" y="943" fill="white" font-size="12" font-weight="700" text-anchor="middle">Plánovače — automatika na pozadí</text>
+        <text x="450" y="959" fill="#94a3b8" font-size="8" text-anchor="middle">launchd (macOS natívne) pre agentov · crontab len pre shell skripty</text>
+
+        <rect x="55" y="975" width="260" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="185" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">crontab */30 — auto-commit.sh</text>
+        <text x="185" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">vault → git push (zálohovanie)</text>
+
+        <rect x="325" y="975" width="260" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="455" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd :43 — dreamer hodinovo</text>
+        <text x="455" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">LaunchAgent plist v ~/Library/LaunchAgents/</text>
+
+        <rect x="595" y="975" width="260" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="725" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd 03:30 — deep-dreamer</text>
+        <text x="725" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">denná údržba vault-u</text>
+
+        <!-- POZOR box: cron-vs-launchd gotcha for father's replication -->
+        <rect x="55" y="1021" width="800" height="42" rx="4" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="68" y="1037" fill="#fb7185" font-size="9" font-weight="700">⚠ POZOR — prečo launchd a nie cron:</text>
+        <text x="68" y="1050" fill="white" font-size="8">macOS Keychain (kde sa uchováva Claude login token) je dostupný LEN z GUI session. cron beží mimo GUI session →</text>
+        <text x="68" y="1061" fill="white" font-size="8">Claude CLI tam token nenájde a ticho spadne (exit 1, žiadny stderr). launchd LaunchAgent beží v GUI session → funguje.</text>
+
+        <!-- GitHub (backup emphasis) -->
+        <rect x="900" y="920" width="380" height="150" rx="6" fill="#0f172a"/>
+        <rect x="900" y="920" width="380" height="150" rx="6" fill="rgba(30, 41, 59, 0.55)" stroke="#94a3b8" stroke-width="2"/>
+        <text x="1090" y="945" fill="white" font-size="13" font-weight="700" text-anchor="middle">GitHub — zálohovanie v cloude</text>
+        <text x="1090" y="961" fill="#94a3b8" font-size="9" text-anchor="middle">github.com/MaoTanx/ (súkromné repá)</text>
+        <line x1="920" y1="971" x2="1260" y2="971" stroke="#1e293b" stroke-width="1"/>
+        <text x="920" y="987" fill="#94a3b8" font-size="9">• KaelVault (Obsidian vault, súkromný)</text>
+        <text x="920" y="1001" fill="#94a3b8" font-size="9">• ostatné repá projektov</text>
+        <text x="920" y="1020" fill="#fbbf24" font-size="9" font-style="italic">⚡ zálohovaný každých 30 minút</text>
+        <text x="920" y="1036" fill="#fbbf24" font-size="9" font-style="italic">⚡ pred push-om beží secret-scan</text>
+        <text x="920" y="1052" fill="#fbbf24" font-size="9" font-style="italic">   (blokuje únik hesiel / API tokenov)</text>
+        <text x="920" y="1066" fill="#22d3ee" font-size="9">Strata Mac-u = žiadna strata dát</text>
+
+        <!-- =================================================================
+             COMPONENTS — ROW 7: Tretie strany
+             ================================================================= -->
+
+        <rect x="30" y="1090" width="800" height="60" rx="6" fill="#0f172a"/>
+        <rect x="30" y="1090" width="800" height="60" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="430" y="1111" fill="white" font-size="11" font-weight="700" text-anchor="middle">Tretie strany — externé API / schopnosti</text>
+
+        <rect x="50" y="1120" width="180" height="22" rx="3" fill="rgba(136, 19, 55, 0.3)" stroke="#fb7185" stroke-width="1"/>
+        <text x="140" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">Gmail SMTP + IMAP</text>
+
+        <rect x="240" y="1120" width="180" height="22" rx="3" fill="rgba(136, 19, 55, 0.3)" stroke="#fb7185" stroke-width="1"/>
+        <text x="330" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">Anthropic API</text>
+
+        <rect x="430" y="1120" width="180" height="22" rx="3" fill="rgba(136, 19, 55, 0.3)" stroke="#fb7185" stroke-width="1"/>
+        <text x="520" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">OpenAI Whisper</text>
+
+        <rect x="620" y="1120" width="200" height="22" rx="3" fill="rgba(30, 41, 59, 0.55)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="720" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">GitHub API (cez gh CLI)</text>
+
+        <!-- Nástroje -->
+        <rect x="850" y="1090" width="620" height="60" rx="6" fill="#0f172a"/>
+        <rect x="850" y="1090" width="620" height="60" rx="6" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="1160" y="1111" fill="white" font-size="11" font-weight="700" text-anchor="middle">Nástroje — runtime a CLI</text>
+
+        <rect x="870" y="1120" width="105" height="22" rx="3" fill="rgba(251, 146, 60, 0.25)" stroke="#fb923c" stroke-width="1"/>
+        <text x="922" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">claude</text>
+
+        <rect x="985" y="1120" width="90" height="22" rx="3" fill="rgba(251, 146, 60, 0.25)" stroke="#fb923c" stroke-width="1"/>
+        <text x="1030" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">gh</text>
+
+        <rect x="1085" y="1120" width="115" height="22" rx="3" fill="rgba(251, 146, 60, 0.25)" stroke="#fb923c" stroke-width="1"/>
+        <text x="1142" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">node + bun</text>
+
+        <rect x="1210" y="1120" width="125" height="22" rx="3" fill="rgba(251, 146, 60, 0.25)" stroke="#fb923c" stroke-width="1"/>
+        <text x="1272" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">Python · uv</text>
+
+        <rect x="1345" y="1120" width="115" height="22" rx="3" fill="rgba(251, 146, 60, 0.25)" stroke="#fb923c" stroke-width="1"/>
+        <text x="1402" y="1135" fill="white" font-size="9" font-weight="600" text-anchor="middle">Playwright</text>
+
+        <!-- =================================================================
+             LEGEND (inside SVG, top-right corner per template pattern)
+             ================================================================= -->
+
+        <text x="1305" y="68" fill="white" font-size="10" font-weight="600">Legenda — zdroj</text>
+
+        <rect x="1305" y="80" width="14" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="1325" y="89" fill="#94a3b8" font-size="8">Anthropic</text>
+
+        <rect x="1305" y="96" width="14" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="1325" y="105" fill="#94a3b8" font-size="8">Discord</text>
+
+        <rect x="1305" y="112" width="14" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="1325" y="121" fill="#94a3b8" font-size="8">Obsidian</text>
+
+        <rect x="1305" y="128" width="14" height="10" rx="2" fill="rgba(30, 41, 59, 0.55)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="1325" y="137" fill="#94a3b8" font-size="8">GitHub</text>
+
+        <rect x="1305" y="144" width="14" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="1325" y="153" fill="#94a3b8" font-size="8">Vlastné</text>
+
+        <rect x="1305" y="160" width="14" height="10" rx="2" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="1325" y="169" fill="#94a3b8" font-size="8">Tretie strany</text>
+
+        <rect x="1305" y="176" width="14" height="10" rx="2" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="1325" y="185" fill="#94a3b8" font-size="8">Nástroje</text>
+
+      </svg>
+    </div>
+
+    <!-- =================================================================
+         INFO CARDS (3 summary cards per template)
+         ================================================================= -->
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>Ako to funguje</h3>
+        </div>
+        <ul>
+          <li>• Miro píše správu na Discord (chat).</li>
+          <li>• Discord plugin doručí správu do Kael CLI — hlavnej terminálovej session bežiacej na Macu.</li>
+          <li>• Claude spracuje s plným prístupom k auto-pamäti, vault-u (cez Smart Connections) a nástrojom.</li>
+          <li>• Odpoveď pošle späť na Discord.</li>
+          <li>• Dreamer agent každú hodinu zapíše poznatky z rozhovoru do vault-u; GitHub ho zálohuje každých 30 minút.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>Ako to spustiť</h3>
+        </div>
+        <ul>
+          <li>• <code>claude</code> — hlavná Kael session v termináli</li>
+          <li>• <code>~/bin/run-agents dreamer</code> — manuálny dreamer</li>
+          <li>• <code>~/bin/run-agents deep-dreamer</code> — údržba vault-u</li>
+          <li>• <code>launchctl load ~/Library/LaunchAgents/com.*.plist</code> — plán agenta</li>
+          <li>• <code>crontab -e</code> — len shell úlohy (napr. auto-commit)</li>
+          <li>• <code>obsidian ~/KaelVault</code> — otvorí vault v Obsidian app</li>
+          <li>• <code>gh repo clone MaoTanx/KaelVault</code> — obnova zo zálohy</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Kľúčové fakty</h3>
+        </div>
+        <ul>
+          <li>• 1 aktívny hook (discord-reply-check)</li>
+          <li>• 1 cron (auto-commit) + 2 launchd (dreamer, deep-dreamer)</li>
+          <li>• ~35 súborov v auto-pamäti</li>
+          <li>• stovky poznámok v KaelVault-e</li>
+          <li>• GitHub zálohuje každých 30 minút</li>
+          <li>• Claude Opus 4.7 cez Max-plán (bez per-token platenia)</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <!-- =================================================================
+         GLOSSARY — one-sentence explanation per component
+         ================================================================= -->
+
+    <h2>Glosár — čo každá komponenta robí</h2>
+    <p class="subtitle" style="margin-left: 0; margin-bottom: 1rem;">
+      Jedna veta na každú vec. Farebný štítok = zdroj (viď legenda v diagrame).
+    </p>
+
+    <div class="glossary">
+
+      <!-- Anthropic -->
+      <div class="gloss-card gl-anthropic">
+        <div class="gloss-name">Claude Opus 4.7 <span class="src-tag src-anthropic">Anthropic</span></div>
+        <div class="gloss-desc">Veľký jazykový model (AI mozog), ktorý spracováva každú správu — rozumie, odpovedá, volá nástroje; beží v cloude Anthropic-u a prístup máme cez Max-plán predplatné.</div>
+      </div>
+
+      <div class="gloss-card gl-anthropic">
+        <div class="gloss-name">Claude Code CLI (<code>claude</code>) <span class="src-tag src-anthropic">Anthropic</span></div>
+        <div class="gloss-desc">Terminálová aplikácia, ktorá hostí session s Claudom a dáva mu prístup k nástrojom (Bash, Read/Write, Git, MCP servery); v tomto setup-e je to „telo" Kaela.</div>
+      </div>
+
+      <div class="gloss-card gl-anthropic">
+        <div class="gloss-name">Superpowers plugin <span class="src-tag src-anthropic">Anthropic</span></div>
+        <div class="gloss-desc">Oficiálny plugin z Anthropic marketplace-u, ktorý pridáva 14 pracovných „skill-ov" — brainstorming pred tvorbou, writing-plans, TDD, dispatching-parallel-agents a ďalšie.</div>
+      </div>
+
+      <div class="gloss-card gl-anthropic">
+        <div class="gloss-name">claude-agent-sdk <span class="src-tag src-anthropic">Anthropic</span></div>
+        <div class="gloss-desc">Python knižnica od Anthropic-u, ktorá umožňuje spúšťať Claude agentov z vlastného kódu — používa ju napr. skript, ktorý každú hodinu fire-uje dreamer.</div>
+      </div>
+
+      <!-- Discord -->
+      <div class="gloss-card gl-discord">
+        <div class="gloss-name">Discord (chat kanál) <span class="src-tag src-discord">Discord</span></div>
+        <div class="gloss-desc">Chatovacia platforma — primárny spôsob komunikácie Miroa s Kaelom (z mobilu aj PC); v kanáli je bot „MaoTanx", ktorý správy doručuje do Kael CLI.</div>
+      </div>
+
+      <div class="gloss-card gl-discord">
+        <div class="gloss-name">plugin:discord:discord (MCP) <span class="src-tag src-discord">Discord</span></div>
+        <div class="gloss-desc">Claude Code plugin, ktorý prepája Claudovu session s Discord API — Claude dostáva správy, posiela odpovede, vie čítať prílohy a reagovať emoji.</div>
+      </div>
+
+      <!-- Own-made -->
+      <div class="gloss-card gl-own" style="border-left-width: 6px;">
+        <div class="gloss-name">CLAUDE.md — hlavný súbor <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc"><strong>Jadro celého setup-u.</strong> Markdown súbor v ~/CLAUDE.md s permanentnými pravidlami — identita Kaela, trust hierarchia pre Discord, komunikačné pravidlá, bezpečnostné zámky (email, TV, súbory), inštrukcie pre prácu s pamäťou. Claude Code ho automaticky načíta na začiatku každej session a prežije aj kompakciu kontextu.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">Auto-pamäť <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Priečinok ~35 malých markdown súborov (v ~/.claude/...), ktoré Claude automaticky načíta na začiatku každej session — osobnosť, pravidlá, profily ľudí, preferencie.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">Dreamer (agent) <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Script, ktorý každú hodinu prečíta nové správy z transkriptu rozhovoru a pretaví ich do štruktúrovaných zápiskov v KaelVault-e — chat sa mení na dlhodobú pamäť.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">Deep-dreamer (agent) <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Agent, ktorý raz denne (o 03:30) upratuje vault — zlučuje duplikáty, opravuje pokazené wiki-odkazy, čistí MEMORY.md index a pridáva krížové referencie.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">Ďalší agenti (research-explorer) <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Špecializovaní sub-agenti, ktorých si Claude zavolá keď treba hlboký prieskum kódu / webu / dokumentácie; každý má vlastný systémový prompt a obmedzené nástroje.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">Vlastné skilly <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Opakovateľné pracovné postupy napísané ako markdown — ultrareview-local dispatch-ne paralelných reviewer-ov; architecture-diagram vygeneroval tento diagram.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">Hook: discord_reply_check <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Python script, ktorý sa spustí na konci každého turnu — skontroluje, či Claude odpovedal na Discord; ak nie, zablokuje koniec turnu kým odpoveď nenapíše.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">auto-commit.sh <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Bash script, ktorý každých 30 min skopíruje auto-pamäť do vault-u, spraví git commit a push na GitHub — pred tým prebehne secret-scan proti únikom tokenov.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">run-agents <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Python wrapper, ktorý cron-y používajú na spustenie dreamer / deep-dreamer — vyberie správne session-y na spracovanie a odovzdá SDK potrebné povolenia.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">kael-toolkit <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Zdieľané Python prostredie (~/tools/kael-toolkit/), kde býva claude-agent-sdk a vlastné pomocné moduly — projekty sa naň odkazujú namiesto inštalácie SDK zakaždým.</div>
+      </div>
+
+      <!-- Obsidian -->
+      <div class="gloss-card gl-obsidian">
+        <div class="gloss-name">KaelVault <span class="src-tag src-obsidian">Obsidian</span></div>
+        <div class="gloss-desc">Priečinok markdown súborov organizovaných ako znalostná báza (Daily/, People/, Projects/, System/) — Miro ho prezerá v Obsidian app, dreamer doň píše, GitHub zálohuje.</div>
+      </div>
+
+      <div class="gloss-card gl-obsidian">
+        <div class="gloss-name">Obsidian aplikácia <span class="src-tag src-obsidian">Obsidian</span></div>
+        <div class="gloss-desc">Desktop app, v ktorej Miro prezerá a edituje KaelVault ako súvislú wiki s graph-view, wiki-odkazmi a search-om; zdarma, beží lokálne, bez cloud závislosti.</div>
+      </div>
+
+      <div class="gloss-card gl-obsidian">
+        <div class="gloss-name">Smart Connections MCP <span class="src-tag src-obsidian">Obsidian</span></div>
+        <div class="gloss-desc">Plugin do Obsidian-u, ktorý sa zároveň tvári ako MCP server — poskytuje Claudovi nástroje na sémantické hľadanie v KaelVault-e (AI embeddings, nie iba fulltext).</div>
+      </div>
+
+      <!-- GitHub -->
+      <div class="gloss-card gl-github">
+        <div class="gloss-name">GitHub (zálohovanie) <span class="src-tag src-github">GitHub</span></div>
+        <div class="gloss-desc">Cloudové úložisko git repozitárov — každých 30 min sa tam pushne KaelVault a projekty; funguje ako off-site backup. Strata Mac-u = žiadna strata dát.</div>
+      </div>
+
+      <div class="gloss-card gl-github">
+        <div class="gloss-name">gh CLI <span class="src-tag src-github">GitHub</span></div>
+        <div class="gloss-desc">Oficiálny GitHub príkazový riadok — Claude ho používa cez Bash na vytváranie pull request-ov, archiváciu repozitárov, read/write issue; auth cez macOS keychain.</div>
+      </div>
+
+      <!-- Third-party -->
+      <div class="gloss-card gl-third">
+        <div class="gloss-name">Gmail SMTP + IMAP <span class="src-tag src-third">Tretie strany</span></div>
+        <div class="gloss-desc">Prístup k Miroovmu gmail účtu (maotanx@gmail.com) cez SMTP na odosielanie a IMAP na čítanie — Claude posiela emaily keď Miro požiada; poverenia v .env súbore.</div>
+      </div>
+
+      <div class="gloss-card gl-third">
+        <div class="gloss-name">Anthropic API <span class="src-tag src-third">Tretie strany</span></div>
+        <div class="gloss-desc">Vzdialený endpoint Claude LLM — volania idú cez Max-plán OAuth (nie cez per-token API key), takže sa platí paušál a volania sa rátajú do 5-hodinového limitu.</div>
+      </div>
+
+      <div class="gloss-card gl-third">
+        <div class="gloss-name">OpenAI Whisper <span class="src-tag src-third">Tretie strany</span></div>
+        <div class="gloss-desc">API od OpenAI na prepis hlasu na text — Claude ho volá keď príde voice message cez Discord, aby rozumel čo Miro hovoril.</div>
+      </div>
+
+      <!-- Tools -->
+      <div class="gloss-card gl-tool">
+        <div class="gloss-name">Node.js + Bun <span class="src-tag src-tool">Nástroje</span></div>
+        <div class="gloss-desc">JavaScript runtime-y — Node.js (v22) beží Discord plugin a niektoré skripty; Bun je rýchlejšia alternatíva používaná pre MCP servery.</div>
+      </div>
+
+      <div class="gloss-card gl-tool">
+        <div class="gloss-name">Python 3.11 + uv <span class="src-tag src-tool">Nástroje</span></div>
+        <div class="gloss-desc">Python runtime a uv (správca balíkov a virtuálnych prostredí, rýchlejšia náhrada pip+venv) — používané pre všetky Python skripty (dreamer wrapper, hook-y, …).</div>
+      </div>
+
+      <div class="gloss-card gl-tool">
+        <div class="gloss-name">Playwright + Chrome <span class="src-tag src-tool">Nástroje</span></div>
+        <div class="gloss-desc">Automatizácia webového prehliadača (stealth Chrome) — Claude ju používa keď treba niečo spraviť na webe cez UI (napr. generovanie hudby na Suno), nie cez API.</div>
+      </div>
+
+      <div class="gloss-card gl-tool">
+        <div class="gloss-name">Tailscale <span class="src-tag src-tool">Nástroje</span></div>
+        <div class="gloss-desc">Súkromná VPN sieť (zero-config), ktorá spája mobil, laptop a Mac Mini — umožňuje SSH / VNC z mobilu kdekoľvek vo svete bez otvárania portov v routri.</div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <p class="footer">
+      Kael architecture · vygenerované 2026-04-19 · Claude Code + Superpowers · slovensky pre tata
+    </p>
+
+  </div>
+</body>
+</html>
