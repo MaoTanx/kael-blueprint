@@ -9,15 +9,7 @@ updated: 2026-04-20
 
 A reproducible blueprint for setting up a Claude Code–based personal AI assistant with persistent memory, a knowledge vault, and a dreamer-driven memory pipeline. Designed so a Claude Code session can read this document and help the user build the system from scratch.
 
-> **⚠ Updates since initial draft (2026-04-20)** — several concrete components described later in this doc have been replaced during live debugging. Read this summary BEFORE building from the detailed sections below, then use the new components:
->
-> 1. **Scheduler: launchd only, not cron.** macOS cron can't access Keychain (where the Claude CLI stores its session token) because cron runs outside the user GUI session. Scheduled dreamer runs from `/usr/sbin/cron` silently exit 1. Put your scheduled jobs in `~/Library/LaunchAgents/com.<name>.<agent>.plist` as `LaunchAgent` entries — those inherit the user GUI session.
-> 2. **Dreamer wrapper: single Python script, not shell+python.** The original design was a `run-*-cron` shell wrapper calling a Python `run-agents` dispatcher. Simplified to one Python script per agent: `~/bin/run-dreamer` and `~/bin/run-deep-dreamer`. Atomic `mkdir` lock, full SDK message logging, `bypassPermissions` mode, explicit denylist.
-> 3. **Cursor state: separate JSON file, NOT daily-note frontmatter.** Originally the dreamer tracked `processed_sessions[].lines_processed` inside `Daily/YYYY-MM-DD.md`. That coupled the agent's cursor state to a human-edited file and caused a reset-to-zero bug. Canonical state now lives in `~/.claude/dreamer-state/cursors.json`, wrapper-owned, atomically written on agent success only. Vault becomes pure output.
-> 4. **Permission mode: `bypassPermissions` + explicit denylist, NOT `dontAsk` + allowlist.** With a `SystemPromptFile` subagent, `dontAsk` + `allowed_tools` was silently rejecting Write/Edit to paths clearly matched by the allowlist. `bypassPermissions` + explicit `disallowed_tools` works reliably and is strictly more auditable (a denylist is a single source of truth; an allowlist you can accidentally under-specify).
-> 5. **SDK message handler: `hasattr(msg, 'content')`, NOT `hasattr(msg.message, 'content')`.** `AssistantMessage.content` and `UserMessage.content` are direct attributes. My initial handler used the wrong attribute path and lost all text/tool_use visibility — making debugging impossible until we fixed it.
->
-> Canonical post-fix reference: `System/Dreamer Reliability Debug — 2026-04-20.md` in this vault. The detailed sections below (§11–§15 on cron, §13 on dreamer logic) describe the original design for completeness; read them to understand the *shape*, then apply the five fixes above when you actually wire it up.
+**Current shape (post-2026-04-20 rewrite):** five launchd jobs + a knowledge vault + a health dashboard on Tailscale. Scheduling is launchd-only (NOT cron — see §11 for why). The dreamer uses a wrapper-owned cursor file, not in-vault frontmatter. The wrapper runs the agent with `bypassPermissions` + an explicit denylist. See the body below for the full build.
 
 The source system it derives from has additional domain-specific extensions (a voice interface, a game-analysis pipeline, music tooling) that are intentionally NOT part of this blueprint. Those are personal flavor. What's here is the structural pattern: the three-layer memory, the dreamer, the vault, the hooks, and the Discord front end.
 
@@ -1179,540 +1171,105 @@ Note on secret patterns: the list above covers common vendors. Add patterns for 
 
 ---
 
-## 13. Shared Python toolkit + `run-agents` CLI
 
-### 13.1 Why a shared toolkit
+## 13. Scripts in `~/bin/` — one per scheduled job
 
-The dreamer is invoked via the `claude-agent-sdk` Python package, which needs a stable Python environment that cron and launchd can reach. Putting it in a dedicated toolkit directory (`~/tools/yourtoolkit/`) lets multiple projects reuse the same SDK without per-project installs and version drift.
+All scheduling is launchd-driven (see §14). Each launchd entry calls ONE standalone script — no shell wrappers, no dispatcher. The four scripts are:
 
-### 13.2 Toolkit setup
+| Script | Purpose | Invoked by |
+|---|---|---|
+| `run-dreamer` | Process new session-transcript content into vault knowledge | `com.kael.dreamer.plist` (hourly) |
+| `run-deep-dreamer` | Daily vault maintenance (dedup, link repair, trim MEMORY.md) | `com.kael.deep-dreamer.plist` (03:30 daily) |
+| `kael-health` | Serve the health dashboard on Tailscale-bound port 8787 | `com.kael.health.plist` (always-on daemon) |
+| `sync-blueprint` | Copy the 3 architecture docs from vault → public `kael-blueprint` repo | Manual, ad-hoc |
 
-```bash
-mkdir -p ~/tools/yourtoolkit/src/yourtoolkit
-cd ~/tools/yourtoolkit
-```
+### 13.1 The toolkit venv
 
-`~/tools/yourtoolkit/pyproject.toml`:
-
-```toml
-[project]
-name = "yourtoolkit"
-version = "0.1.0"
-description = "Shared Python helpers and the Claude Agent SDK pinned for multi-project reuse."
-readme = "README.md"
-authors = [
-    { name = "<your-name>", email = "<your-email>" }
-]
-requires-python = ">=3.11"
-dependencies = [
-    "claude-agent-sdk>=0.1.63",
-]
-
-[build-system]
-requires = ["uv_build>=0.11.6,<0.12.0"]
-build-backend = "uv_build"
-```
-
-`~/tools/yourtoolkit/src/yourtoolkit/__init__.py`:
-
-```python
-"""Shared helpers for cron agents and any other multi-project reuse."""
-```
-
-Sync:
+Shared Python virtualenv at `~/tools/kael-toolkit/.venv/` with `claude-agent-sdk` installed. All scheduler scripts point their shebang at this venv (`#!/Users/<you>/tools/kael-toolkit/.venv/bin/python3`) — no activation dance, deterministic deps.
 
 ```bash
-cd ~/tools/yourtoolkit
-uv sync
+cd ~/tools/kael-toolkit
+uv sync  # creates .venv/ with claude-agent-sdk
 ```
 
-This produces `.venv/` with `claude-agent-sdk` installed. The interpreter at `.venv/bin/python3` is what the `run-agents` script and cron wrappers point at.
-
-### 13.3 `~/bin/run-agents`
-
-The CLI that fires the dreamer or deep-dreamer via the SDK. Scoped permissions — not bypass.
-
-```python
-#!/<absolute-path-to>/tools/yourtoolkit/.venv/bin/python3
-"""Fire dreamer or deep-dreamer agents via claude-agent-sdk.
-
-Standalone system script — not tied to any project. Lives at ~/bin/
-so it's on PATH and callable from cron.
-
-Usage:
-    run-agents dreamer
-    run-agents deep-dreamer
-    run-agents list-sessions
-"""
-from __future__ import annotations
-
-import asyncio
-import datetime
-import os
-import re
-import sys
-import tempfile
-from pathlib import Path
-
-TOOLKIT_SITE = Path.home() / "tools/yourtoolkit/.venv/lib/python3.11/site-packages"
-if TOOLKIT_SITE.exists():
-    sys.path.insert(0, str(TOOLKIT_SITE))
-
-from claude_agent_sdk import query, ClaudeAgentOptions, list_sessions
-from claude_agent_sdk.types import SystemPromptFile
-
-AGENTS_DIR = Path.home() / ".claude" / "agents"
-VAULT = Path.home() / "<your-vault-dir>"
-MEMORY_DIR = Path.home() / ".claude" / "projects" / "<project-key>" / "memory"
-SESSIONS_DIR = Path.home() / ".claude" / "projects" / "<project-key>"
-
-
-DREAMER_ALLOW = [
-    "Read",
-    "Grep",
-    "Glob",
-    f"Write({VAULT}/**)",
-    f"Edit({VAULT}/**)",
-    f"Write({MEMORY_DIR}/**)",
-    f"Edit({MEMORY_DIR}/**)",
-    "Bash(ls *)",
-    "Bash(cat *)",
-    "Bash(head *)",
-    "Bash(tail *)",
-    "Bash(wc *)",
-    "Bash(date)",
-    "Bash(git status*)",
-    "Bash(git log*)",
-    "Bash(git diff*)",
-    "Bash(git add *)",
-    "Bash(git commit -m*)",
-]
-
-DREAMER_DENY = [
-    "Bash(curl *)", "Bash(wget *)", "Bash(nc *)", "Bash(ssh *)", "Bash(scp *)",
-    "Bash(gh *)", "Bash(sudo *)", "Bash(rm *)", "Bash(rm -rf *)",
-    "Bash(git push*)", "Bash(git reset*)", "Bash(git filter-repo*)",
-    "Bash(launchctl *)", "Bash(pkill*)", "Bash(kill *)",
-    "Bash(base64 *)", "Bash(env)", "Bash(printenv*)",
-    f"Edit({Path.home()}/CLAUDE.md)",
-    f"Edit({Path.home()}/.claude/settings.json)",
-    f"Edit({Path.home()}/.claude/settings.local.json)",
-    f"Edit({Path.home()}/Library/LaunchAgents/**)",
-    f"Edit({Path.home()}/bin/**)",
-    f"Write({Path.home()}/CLAUDE.md)",
-    f"Write({Path.home()}/.claude/settings.json)",
-    f"Write({Path.home()}/.claude/settings.local.json)",
-    f"Write({Path.home()}/Library/LaunchAgents/**)",
-    f"Write({Path.home()}/bin/**)",
-    "WebFetch",
-    "WebSearch",
-]
-
-
-async def fire_agent(name: str, prompt: str, max_turns: int = 40) -> dict:
-    agent_file = AGENTS_DIR / f"{name}.md"
-    if not agent_file.exists():
-        print(f"Agent definition not found: {agent_file}")
-        return {"success": False}
-
-    options = ClaudeAgentOptions(
-        max_turns=max_turns,
-        permission_mode="dontAsk",
-        allowed_tools=DREAMER_ALLOW,
-        disallowed_tools=DREAMER_DENY,
-        cwd=str(Path.home()),
-        system_prompt=SystemPromptFile(file=str(agent_file)),
-    )
-
-    print(f"[{name}] spawning via SDK...")
-    result = {"success": False}
-    async for msg in query(prompt=prompt, options=options):
-        if hasattr(msg, "message") and hasattr(msg.message, "content"):
-            for block in msg.message.content:
-                if hasattr(block, "text") and block.text.strip():
-                    print(block.text[:500])
-        elif hasattr(msg, "subtype"):
-            if msg.subtype == "success":
-                print(f"\n[{name}] done ({msg.duration_ms}ms, {msg.num_turns} turns)")
-                result = {
-                    "success": True,
-                    "duration_ms": msg.duration_ms,
-                    "num_turns": msg.num_turns,
-                }
-    return result
-
-
-def _daily_note_path() -> Path:
-    today = datetime.date.today().isoformat()
-    return VAULT / "Daily" / f"{today}.md"
-
-
-def _read_last_dreamer_run() -> float:
-    """Read last_dreamer_run from today's daily note frontmatter.
-
-    Clamped to max(ts, now - 24h) as a self-heal ceiling.
-    """
-    today_ts = datetime.datetime.now().timestamp()
-    twenty_four_hours_ago = today_ts - 24 * 3600
-    daily = _daily_note_path()
-    if daily.exists():
-        try:
-            text = daily.read_text(encoding="utf-8")
-            m = re.search(r"^last_dreamer_run:\s*(\S+)", text, flags=re.MULTILINE)
-            if m:
-                ts = m.group(1).rstrip("Z")
-                dt = datetime.datetime.fromisoformat(ts)
-                return max(dt.timestamp(), twenty_four_hours_ago)
-        except Exception as e:
-            print(f"  warn: could not parse last_dreamer_run ({e})")
-    midnight = datetime.datetime.combine(datetime.date.today(), datetime.time.min)
-    return max(midnight.timestamp(), twenty_four_hours_ago)
-
-
-def _write_last_dreamer_run_atomic(now_iso: str) -> None:
-    """Atomically write `last_dreamer_run: <now_iso>` into today's daily note frontmatter.
-
-    Shell-owned (not agent-owned): if the agent times out or crashes, the timestamp
-    stays put and next cron retries from the same checkpoint.
-    """
-    daily = _daily_note_path()
-    if not daily.exists():
-        # Create a minimal frontmatter block so future runs have a place to write.
-        daily.parent.mkdir(parents=True, exist_ok=True)
-        today = datetime.date.today().isoformat()
-        daily.write_text(f"---\ntype: log\ncreated: {today}\nlast_dreamer_run: {now_iso}\n---\n\n# {today}\n", encoding="utf-8")
-        return
-    text = daily.read_text(encoding="utf-8")
-    if re.search(r"^last_dreamer_run:", text, flags=re.MULTILINE):
-        new_text = re.sub(
-            r"^last_dreamer_run:.*$",
-            f"last_dreamer_run: {now_iso}",
-            text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-    else:
-        new_text = re.sub(
-            r"^(---\n(?:.*?\n)*?)(---\n)",
-            r"\1last_dreamer_run: " + now_iso + "\n\2",
-            text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-
-    with tempfile.NamedTemporaryFile("w", dir=daily.parent, delete=False, encoding="utf-8") as tmp:
-        tmp.write(new_text)
-        tmp_path = Path(tmp.name)
-    os.replace(tmp_path, daily)
-
-
-def fire_dreamer() -> None:
-    last_run_ts = _read_last_dreamer_run()
-    floor_ts = last_run_ts - 300  # 5-minute safety margin
-
-    candidates = []
-    for p in SESSIONS_DIR.glob("*.jsonl"):
-        try:
-            mtime = p.stat().st_mtime
-        except OSError:
-            continue
-        if mtime >= floor_ts:
-            candidates.append(p)
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
-    if not candidates:
-        print(f"No session files modified since last dreamer run (floor={floor_ts})")
-        return
-
-    print(f"Last dreamer run (floor): {floor_ts} — {len(candidates)} candidate file(s):")
-    file_list_lines = []
-    for p in candidates:
-        size_mb = p.stat().st_size / 1024 / 1024
-        print(f"  - {p.name}  ({size_mb:.1f} MB)")
-        file_list_lines.append(str(p))
-
-    files_block = "\n".join(f"- {line}" for line in file_list_lines)
-    prompt = (
-        "Multi-session sweep: process the delta in each of these session transcripts "
-        "into today's daily note. For each file, check the daily note frontmatter "
-        "for `processed_sessions[<uuid>].lines_processed`, read only lines AFTER "
-        "that counter, extract knowledge per your usual rules, then update the "
-        "counter to the file's current total line count. Process files in the "
-        "order given (newest first):\n\n"
-        f"{files_block}\n\n"
-        "If a file has no new lines past its counter, skip it. If a counter is "
-        "missing, treat lines_processed as 0. Do NOT update last_dreamer_run — "
-        "the shell wrapper owns that write."
-    )
-    result = asyncio.run(fire_agent("dreamer", prompt))
-    if result.get("success"):
-        now_iso = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-        _write_last_dreamer_run_atomic(now_iso)
-        print(f"[run-agents] wrote last_dreamer_run = {now_iso}")
-    else:
-        print("[run-agents] agent did not report success; last_dreamer_run unchanged")
-
-
-def fire_deep_dreamer() -> None:
-    prompt = (
-        "Run full vault maintenance: merge duplicates, flag stale notes, "
-        "fix broken wikilinks, validate frontmatter, trim MEMORY.md, "
-        "validate index.md."
-    )
-    asyncio.run(fire_agent("deep-dreamer", prompt))
-
-
-def show_sessions() -> None:
-    sessions = list_sessions(limit=10)
-    print(f"Recent sessions ({len(sessions)}):\n")
-    for s in sessions:
-        size_mb = s.file_size / 1024 / 1024
-        print(f"  {s.session_id[:12]}...  {size_mb:5.1f} MB  {s.summary or '(no summary)'}".rstrip())
-
-
-def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: run-agents [dreamer|deep-dreamer|list-sessions]")
-        sys.exit(1)
-    cmd = sys.argv[1]
-    if cmd == "dreamer":
-        fire_dreamer()
-    elif cmd == "deep-dreamer":
-        fire_deep_dreamer()
-    elif cmd == "list-sessions":
-        show_sessions()
-    else:
-        print(f"Unknown command: {cmd}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
-```
-
-Fix the shebang to your actual toolkit path (find it with `realpath ~/tools/yourtoolkit/.venv/bin/python3`). Replace `<your-vault-dir>` and `<project-key>`.
-
-Install:
-
-```bash
-chmod +x ~/bin/run-agents
-```
-
-Make sure `~/bin` is on `$PATH`. Add to `.zshrc` / `.bashrc` if not:
-
-```bash
-export PATH="$HOME/bin:$PATH"
-```
-
-### 13.4 Cron wrapper — `~/bin/run-dreamer-cron`
-
-```bash
-#!/bin/bash
-# Hourly dreamer cron wrapper with atomic lock + logging.
-# Prevents concurrent runs, appends timestamped output to ~/.claude/logs/dreamer.log.
-
-set -euo pipefail
-
-LOCK_DIR="$HOME/.claude/logs/.dreamer.lock.d"
-LOG_FILE="$HOME/.claude/logs/dreamer.log"
-
-mkdir -p "$HOME/.claude/logs"
-
-# Atomic lock via mkdir. check-then-touch would be a TOCTOU race on overlapping fires.
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    LOCK_AGE=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0) ))
-    if [ "$LOCK_AGE" -gt 7200 ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] stale lock (age ${LOCK_AGE}s), clearing" >> "$LOG_FILE"
-        rm -rf "$LOCK_DIR"
-        mkdir "$LOCK_DIR"
-    else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] skipped — another dreamer is running (lock age ${LOCK_AGE}s)" >> "$LOG_FILE"
-        exit 0
-    fi
-fi
-
-trap 'rm -rf "$LOCK_DIR"' EXIT
-
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] dreamer run start" >> "$LOG_FILE"
-"$HOME/bin/run-agents" dreamer >> "$LOG_FILE" 2>&1
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] dreamer run end" >> "$LOG_FILE"
-```
-
-`~/bin/run-deep-dreamer-cron` is structurally identical:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-LOCK_DIR="$HOME/.claude/logs/.deep-dreamer.lock.d"
-LOG_FILE="$HOME/.claude/logs/deep-dreamer.log"
-
-mkdir -p "$HOME/.claude/logs"
-
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    LOCK_AGE=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0) ))
-    if [ "$LOCK_AGE" -gt 7200 ]; then
-        rm -rf "$LOCK_DIR"
-        mkdir "$LOCK_DIR"
-    else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] skipped — another deep-dreamer running" >> "$LOG_FILE"
-        exit 0
-    fi
-fi
-
-trap 'rm -rf "$LOCK_DIR"' EXIT
-
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] deep-dreamer run start" >> "$LOG_FILE"
-"$HOME/bin/run-agents" deep-dreamer >> "$LOG_FILE" 2>&1
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] deep-dreamer run end" >> "$LOG_FILE"
-```
-
-Make both executable:
-
-```bash
-chmod +x ~/bin/run-dreamer-cron ~/bin/run-deep-dreamer-cron
-```
-
-Note on `stat` syntax: `stat -f %m` is BSD/macOS. On Linux use `stat -c %Y`.
-
----
-
-## 14. Scheduling
-
-### 14.1 crontab
-
-For a minimal setup, cron is enough. `crontab -e`:
-
-```
-*/30 * * * * /Users/<username>/<your-vault-dir>/.auto-commit.sh >/dev/null 2>&1
-15 * * * * /Users/<username>/bin/run-dreamer-cron
-30 3 * * * /Users/<username>/bin/run-deep-dreamer-cron
-```
-
-### 14.2 launchd (macOS) — optional but recommended
-
-On macOS, `launchd` is more reliable than cron across sleep/wake cycles. The reference system uses launchd for the dreamer and deep-dreamer (cron is still the fallback).
-
-`~/Library/LaunchAgents/com.yourtoolkit.dreamer.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.yourtoolkit.dreamer</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Users/<username>/bin/run-dreamer-cron</string>
-    </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Minute</key>
-        <integer>15</integer>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>/Users/<username>/.claude/logs/dreamer-launchd.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/<username>/.claude/logs/dreamer-launchd.err</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/Users/<username>/bin:/usr/local/bin:/usr/bin:/bin</string>
-        <key>HOME</key>
-        <string>/Users/<username></string>
-    </dict>
-</dict>
-</plist>
-```
-
-Load it:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.yourtoolkit.dreamer.plist
-```
-
-`com.yourtoolkit.deep-dreamer.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.yourtoolkit.deep-dreamer</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Users/<username>/bin/run-deep-dreamer-cron</string>
-    </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>3</integer>
-        <key>Minute</key>
-        <integer>30</integer>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>/Users/<username>/.claude/logs/deep-dreamer-launchd.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/<username>/.claude/logs/deep-dreamer-launchd.err</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/Users/<username>/bin:/usr/local/bin:/usr/bin:/bin</string>
-        <key>HOME</key>
-        <string>/Users/<username></string>
-    </dict>
-</dict>
-</plist>
-```
-
-Load:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.yourtoolkit.deep-dreamer.plist
-```
-
-Stagger the two jobs — dreamer hourly at `:15`, deep-dreamer once a day at `03:30` (lowest-activity window) — so they don't fight for the same resources.
-
-Disable or unload with `launchctl unload <path>`.
-
-### 14.3 Linux — systemd
-
-On Linux, use `systemd --user` timers instead of launchd. Create `~/.config/systemd/user/dreamer.service`:
-
-```ini
-[Unit]
-Description=Dreamer hourly memory extraction
-
-[Service]
-Type=oneshot
-ExecStart=%h/bin/run-dreamer-cron
-```
-
-And `~/.config/systemd/user/dreamer.timer`:
-
-```ini
-[Unit]
-Description=Hourly dreamer run
-
-[Timer]
-OnCalendar=*-*-* *:15:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable:
-
-```bash
-systemctl --user enable --now dreamer.timer
-```
-
-Repeat for the deep-dreamer with `OnCalendar=*-*-* 03:30:00`.
-
----
+### 13.2 `~/bin/run-dreamer` — the load-bearing piece
+
+Single self-contained Python script. Owns cursor state AND agent invocation end-to-end. Flow per invocation:
+
+1. Acquire atomic `mkdir` lock at `~/.claude/dreamer-state/lock` (2h stale-lock timeout).
+2. Read `~/.claude/dreamer-state/cursors.json` — flat JSON of `{session-filename: last-line-processed}`.
+3. Scan `~/.claude/projects/<escaped-project-dir>/*.jsonl`. For each file, compare `wc -l` against the cursor. Positive delta → add to work list.
+4. Build explicit prompt listing each file with FROM/TO line numbers. Agent does not choose its own offsets.
+5. Spawn the `dreamer` agent via `claude-agent-sdk.query(...)` with `ClaudeAgentOptions(permission_mode="bypassPermissions", disallowed_tools=[...])`. The denylist blocks secrets paths, env/keychain reads, launchd editing, `~/bin/` edits, destructive git, network egress.
+6. Log every SDK message line-by-line: `AssistantMessage.content` → text blocks + tool_use; `UserMessage.content` → tool_result; `SystemMessage.subtype` (except `task_progress` heartbeats) → named log line.
+7. On `ResultMessage.subtype == "success"`: atomically write the new cursors via temp-file + rename. On any failure: cursors UNCHANGED → next run retries the same delta.
+8. Release lock.
+
+**Transactional invariant:** cursors advance ONLY on agent success. A crashed / timed-out / permission-blocked / any-other-failed agent leaves cursor state untouched.
+
+**Why `bypassPermissions` + denylist** (not `dontAsk` + allowlist): the scoped-allowlist design silently rejected Write/Edit to paths matched by the allowlist — interaction with `SystemPromptFile` subagent tool inheritance in the SDK. Denylist is single-source-of-truth and strictly more auditable.
+
+Full script at `~/bin/run-dreamer` in the reference system — ~350 lines of Python. Copy verbatim for your build, only change HOME paths.
+
+### 13.3 `~/bin/run-deep-dreamer`
+
+Structurally identical to `run-dreamer` but simpler — deep-dreamer is stateless (no cursors; sweeps the whole vault each run). Own lock dir at `~/.claude/deep-dreamer-state/lock`. Same `bypassPermissions` + denylist. Same full SDK message logging.
+
+### 13.4 `~/bin/kael-health`
+
+Python HTTP server bound to the local Tailscale IP only (`tailscale ip -4` resolved at startup), port 8787. Read-only. Each GET gathers live data from local files: launchctl job state, last N dreamer runs from the log, git status of every tracked repo, cursor deltas, architecture-doc freshness (compares mtime of doc files against a watchlist of system ingredients), recent failures (grep last 24h of each log for ERROR/FATAL/BLOCKED). Renders as one HTML page with `<meta refresh="60">`.
+
+Tailscale is the network auth — anyone in your tailnet can view, nobody else can reach port 8787. On your phone, open the URL in Safari, tap share → Add to Home Screen.
+
+### 13.5 `~/bin/sync-blueprint`
+
+Shell script. Copies the three architecture docs from the private vault to `~/tools/kael-blueprint/` (renamed for public clarity: `kael-architecture-diagram-sk.html` → `architecture-diagram-sk.html`, `kael-blueprint-for-replication.md` → `BLUEPRINT.md`, `kael-architecture.md` → `ARCHITECTURE.md`). If any file changed, commits + pushes to `github.com/<you>/kael-blueprint` with a descriptive message. Idempotent — prints "nothing changed" if no diffs.
+
+## 14. Scheduling — launchd only, no cron
+
+### 14.1 Why launchd and not cron on macOS
+
+macOS cron runs outside the user GUI session and cannot access Keychain. The Claude CLI stores its session token in Keychain (the `Claude Code-credentials` item); `gh auth` / the `osxkeychain` git credential helper also live there. When cron fires a child process:
+
+- Claude CLI asks Keychain for its token → Keychain refuses to unlock outside a GUI session → CLI exits 1 silently.
+- `git push` via osxkeychain helper fails with `could not read Username for "https://github.com"` → auto-commit loses push even when it commits locally.
+
+launchd **LaunchAgent** entries (`~/Library/LaunchAgents/`, not system-wide `/Library/LaunchDaemons/`) run INSIDE the user GUI session — Keychain works. Use launchd for everything scheduled on Kael.
+
+Secondary git-push fallback: extract the GitHub token once via `gh auth token > ~/.config/gh/launchd-token && chmod 600 ~/.config/gh/launchd-token`, then in `.auto-commit.sh` export `GH_TOKEN=$(cat ~/.config/gh/launchd-token)` before `git push`. Works in any context (launchd, cron, bare SSH).
+
+Crontab on the reference system is EMPTY. All jobs are launchd.
+
+### 14.2 The five launchd plists
+
+Place at `~/Library/LaunchAgents/`, load with `launchctl load <path>`. All use `EnvironmentVariables` → `PATH=/Users/<you>/bin:/usr/local/bin:/usr/bin:/bin` and `HOME=/Users/<you>`.
+
+| Plist | Trigger | Program |
+|---|---|---|
+| `com.kael.dreamer.plist` | `StartCalendarInterval Minute=43` (hourly) | `/Users/<you>/bin/run-dreamer` |
+| `com.kael.deep-dreamer.plist` | `StartCalendarInterval Hour=3 Minute=30` (daily) | `/Users/<you>/bin/run-deep-dreamer` |
+| `com.kael.auto-commit.plist` | `StartInterval=1800` (every 30 min) | `/Users/<you>/KaelVault/.auto-commit.sh` |
+| `com.kael.voicekael.plist` | `RunAtLoad=true`, `KeepAlive Crashed=true` (always on) | `/Users/<you>/KaelVoice/index.js` via node |
+| `com.kael.health.plist` | `RunAtLoad=true`, `KeepAlive=true` (always on) | `/Users/<you>/bin/kael-health` |
+
+Each plist writes its stdout/stderr to `~/.claude/logs/<name>-launchd.{log,err}` so a failing launch leaves a visible trace. Inside the scripts, meaningful activity logs to `~/.claude/logs/<name>.log`.
+
+### 14.3 Atomic locking
+
+Each scheduled script uses `mkdir <lockdir>` as its mutex. `mkdir` is atomic on POSIX — no TOCTOU race. 2-hour stale-lock timeout clears any abandoned lock from a crashed previous run. Without this, overlapping launchd fires (e.g., if a run takes > 1 hour) would concurrently write to cursor state and corrupt it.
+
+### 14.4 Health dashboard
+
+`http://<mac-tailscale-hostname>:8787` is the one-click health view. Sections:
+
+- **Schedulers** — state/pid/last-exit/runs per launchd job
+- **Last dreamer runs / last deep-dreamer runs** — timestamp, duration, turns, rc, with color-coded age
+- **Git repos** — local HEAD, remote HEAD, ahead/behind, dirty, last commit message
+- **Dreamer queue** — unprocessed lines per session (cursor vs wc -l)
+- **Architecture docs freshness** — compares mtime of docs vs watched system files
+- **Recent failures** — last 24h of ERROR/FATAL/BLOCKED from the logs
+
+On your phone: Safari → open URL → share → Add to Home Screen. Icon on homescreen opens dashboard directly.
 
 ## 15. Daily operation cookbook — how this system is actually driven
 
