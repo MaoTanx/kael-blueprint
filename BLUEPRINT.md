@@ -2,11 +2,22 @@
 tags: [architecture, blueprint, replication]
 type: blueprint
 created: 2026-04-19
+updated: 2026-04-20
 ---
 
 # Personal AI Assistant — Blueprint for Replication
 
 A reproducible blueprint for setting up a Claude Code–based personal AI assistant with persistent memory, a knowledge vault, and a dreamer-driven memory pipeline. Designed so a Claude Code session can read this document and help the user build the system from scratch.
+
+> **⚠ Updates since initial draft (2026-04-20)** — several concrete components described later in this doc have been replaced during live debugging. Read this summary BEFORE building from the detailed sections below, then use the new components:
+>
+> 1. **Scheduler: launchd only, not cron.** macOS cron can't access Keychain (where the Claude CLI stores its session token) because cron runs outside the user GUI session. Scheduled dreamer runs from `/usr/sbin/cron` silently exit 1. Put your scheduled jobs in `~/Library/LaunchAgents/com.<name>.<agent>.plist` as `LaunchAgent` entries — those inherit the user GUI session.
+> 2. **Dreamer wrapper: single Python script, not shell+python.** The original design was a `run-*-cron` shell wrapper calling a Python `run-agents` dispatcher. Simplified to one Python script per agent: `~/bin/run-dreamer` and `~/bin/run-deep-dreamer`. Atomic `mkdir` lock, full SDK message logging, `bypassPermissions` mode, explicit denylist.
+> 3. **Cursor state: separate JSON file, NOT daily-note frontmatter.** Originally the dreamer tracked `processed_sessions[].lines_processed` inside `Daily/YYYY-MM-DD.md`. That coupled the agent's cursor state to a human-edited file and caused a reset-to-zero bug. Canonical state now lives in `~/.claude/dreamer-state/cursors.json`, wrapper-owned, atomically written on agent success only. Vault becomes pure output.
+> 4. **Permission mode: `bypassPermissions` + explicit denylist, NOT `dontAsk` + allowlist.** With a `SystemPromptFile` subagent, `dontAsk` + `allowed_tools` was silently rejecting Write/Edit to paths clearly matched by the allowlist. `bypassPermissions` + explicit `disallowed_tools` works reliably and is strictly more auditable (a denylist is a single source of truth; an allowlist you can accidentally under-specify).
+> 5. **SDK message handler: `hasattr(msg, 'content')`, NOT `hasattr(msg.message, 'content')`.** `AssistantMessage.content` and `UserMessage.content` are direct attributes. My initial handler used the wrong attribute path and lost all text/tool_use visibility — making debugging impossible until we fixed it.
+>
+> Canonical post-fix reference: `System/Dreamer Reliability Debug — 2026-04-20.md` in this vault. The detailed sections below (§11–§15 on cron, §13 on dreamer logic) describe the original design for completeness; read them to understand the *shape*, then apply the five fixes above when you actually wire it up.
 
 The source system it derives from has additional domain-specific extensions (a voice interface, a game-analysis pipeline, music tooling) that are intentionally NOT part of this blueprint. Those are personal flavor. What's here is the structural pattern: the three-layer memory, the dreamer, the vault, the hooks, and the Discord front end.
 

@@ -2,12 +2,22 @@
 tags: [architecture, system, memory, voicekael]
 type: architecture
 created: 2026-04-19
-updated: 2026-04-19
+updated: 2026-04-20
 ---
 
 # Kael System Architecture
 
-Canonical single-state reference for the Kael / Claude Code setup on Miro's Mac mini, as of 2026-04-19 evening. This doc describes what Kael looks like **right now**, not how it got here — the audit-trail version lives at `kael-architecture-2026-04-19.md` next to this file.
+Canonical single-state reference for the Kael / Claude Code setup on Miro's Mac mini. This doc describes what Kael looks like **right now**, not how it got here — the audit-trail version lives at `kael-architecture-2026-04-19.md` next to this file.
+
+> **⚠ Dreamer architecture rewrite (2026-04-20)** — The dreamer pipeline described in sections below has been replaced with a simpler, more reliable design after a full day of debugging. Key differences from what this doc originally described:
+>
+> - **One Python script per agent**: `~/bin/run-dreamer` (hourly) and `~/bin/run-deep-dreamer` (daily 03:30). No more `run-*-cron` shell wrappers, no more `run-agents` Python dispatcher. All three archived to `~/bin/archive-20260420/`.
+> - **Launchd-only scheduling**. The previous dual-scheduler (crontab + launchd) race caused silent failures because cron can't access the macOS Keychain that holds Claude session tokens. Canonical schedule lives in `~/Library/LaunchAgents/com.kael.{dreamer,deep-dreamer}.plist`. Crontab now runs only `auto-commit.sh`.
+> - **Cursor state decoupled from the vault**. The dreamer's per-session line offset used to live in `Daily/YYYY-MM-DD.md` frontmatter under `processed_sessions[].lines_processed`. That's now a single JSON file at `~/.claude/dreamer-state/cursors.json`, owned exclusively by the wrapper, atomically updated on agent success. Daily notes are pure output.
+> - **`bypassPermissions` + explicit denylist**, replacing the prior `dontAsk` + allowlist combination that was silently rejecting Write/Edit to paths clearly matched by the allowlist.
+> - **Full SDK message logging in the wrapper** — every `AssistantMessage` (text/tool_use blocks), `UserMessage` (tool_result), and `SystemMessage` subtype (other than `task_progress` pulses) lands in `~/.claude/logs/dreamer.log` with `[run-id]` correlation and `[MessageType] [block-kind] content` formatting. Full visibility; no more "Check stderr output for details" dead-ends.
+>
+> See `System/Dreamer Reliability Debug — 2026-04-20.md` and `System/run-dreamer SDK Message Parsing Fix — April 2026.md` for the full debugging story. The bodies of sections 5–7 below describe the ORIGINAL design for context; treat this callout as authoritative when it disagrees with them.
 
 Excludes domain projects (Dota2-Analysis, music-taste-profile/Suno, dota-spectate) — those have their own notes.
 
