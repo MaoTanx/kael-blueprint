@@ -1231,6 +1231,18 @@ Tailscale is the network auth — anyone in your tailnet can view, nobody else c
 
 Shell script. Copies the three architecture docs from the private vault to `~/tools/kael-blueprint/` (renamed for public clarity: `kael-architecture-diagram-sk.html` → `architecture-diagram-sk.html`, `kael-blueprint-for-replication.md` → `BLUEPRINT.md`, `kael-architecture.md` → `ARCHITECTURE.md`). If any file changed, commits + pushes to `github.com/<you>/kael-blueprint` with a descriptive message. Idempotent — prints "nothing changed" if no diffs.
 
+### 13.6 `~/bin/mail-kael` — Gmail CLI wrapper
+
+Thin Python wrapper around `imaplib` + `smtplib`. Loads Gmail App Password credentials from `~/.claude/channels/gmail/.env`. Three verbs: `inbox` (list recent messages), `show <uid>` (fetch + print body), `send --to X --subject Y` (send with stdin body).
+
+**Why a wrapper rather than letting Kael call `python -c` directly**: voice-Kael's project-level `settings.json` denies all language runtimes (`python`, `node`, etc.) — the only way voice-Kael can touch mail is via this pre-approved wrapper with a tiny surface area (three verbs, no eval). Text-Kael uses it too for consistency. Replicators: swap in your own email provider (any IMAP + SMTP host works with minor script edits).
+
+### 13.7 `~/bin/lyrics-kael` — OpenAI lyric generator
+
+Thin Python wrapper around an OpenAI `chat.completions` call (reference system uses GPT-5.4 for the Suno/music-taste-profile project). One positional argument: a theme. Returns title + lyrics on stdout, no file persistence. Credentials from `~/.claude/chatgpt.env`.
+
+Same rationale as `mail-kael`: voice-Kael is blocked from `python` directly, so pre-approved wrappers are the permitted code-exec surface. Narrow, audited, and easy to replace or extend per-project.
+
 ## 14. Scheduling — launchd only, no cron
 
 ### 14.1 Why launchd and not cron on macOS

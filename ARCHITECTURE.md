@@ -136,6 +136,7 @@ A few representative entries give a flavor (the full list is personal — creden
 - `feedback_always_discord.md` — "reply on Discord, don't only reply in terminal".
 - `feedback_data_quality.md` — "verify, don't guess; flag uncertainty".
 - `reference_knowledge_arch.md` — "dump + dreamer pipeline, Smart Connections MCP for recall".
+- `feedback_cite_data_sources.md` — every chart/table/factual claim must name its exact data source (API endpoint, scrape URL, primary reference) so disagreement is resolvable.
 
 The specific file names and contents are personal to each operator — the ARCHITECTURE is the prefix convention + the auto-load behavior, not the individual files.
 
@@ -2217,14 +2218,19 @@ Auto-memory handling in the SDK subprocess is steered by:
 
 ### 7.8 VoiceKael scoped settings — the lockdown
 
-`~/KaelVoice/.claude/settings.json` — project-scoped permissions. A 21-entry allowlist + 52-entry denylist. Voice-Kael can't write files, can't push, can't curl out, can't read secrets, can't send Discord messages. It can read, search, and speak. `defaultMode: dontAsk` means any future Claude Code tool addition fails closed, not open.
+`~/KaelVoice/.claude/settings.json` — project-scoped permissions. Read-forward, write-never. Voice-Kael can read scoped directories, search the vault, web-fetch, speak through the pipeline, and call two thin wrapper CLIs (`mail-kael`, `lyrics-kael`) — but can't write files, can't push, can't curl out, can't read secrets, can't send Discord messages, can't invoke arbitrary language runtimes. `defaultMode: dontAsk` means any future Claude Code tool addition fails closed, not open.
 
 ```json
 {
   "permissions": {
     "defaultMode": "dontAsk",
     "allow": [
-      "Read",
+      "Read(/Users/donpiano/KaelVault/**)",
+      "Read(/Users/donpiano/.claude/projects/-Users-donpiano/memory/**)",
+      "Read(/Users/donpiano/CLAUDE.md)",
+      "Read(/Users/donpiano/KaelVoice/**)",
+      "Read(/Users/donpiano/tools/music-taste-profile/**)",
+      "Read(/tmp/**)",
       "Grep",
       "Glob",
       "WebFetch",
@@ -2233,42 +2239,37 @@ Auto-memory handling in the SDK subprocess is steered by:
       "mcp__smart-connections__find_related",
       "mcp__smart-connections__get_context_blocks",
       "Bash(ls *)",
-      "Bash(cat *)",
-      "Bash(head *)",
-      "Bash(tail *)",
-      "Bash(wc *)",
       "Bash(date)",
       "Bash(pwd)",
-      "Bash(echo *)",
+      "Bash(wc *)",
       "Bash(git status*)",
       "Bash(git log*)",
       "Bash(git diff*)",
       "Bash(git branch*)",
-      "Bash(git show*)"
+      "Bash(git show*)",
+      "Bash(/Users/donpiano/bin/mail-kael *)",
+      "Bash(mail-kael *)",
+      "Bash(/Users/donpiano/bin/lyrics-kael *)",
+      "Bash(lyrics-kael *)"
     ],
     "deny": [
+      "Read(/Users/donpiano/.claude/*.env)",
+      "Read(/Users/donpiano/.claude/channels/**/.env)",
+      "Read(/Users/donpiano/.claude/channels/**/.env.*)",
+      "Read(/Users/donpiano/**/.env)",
+      "Read(/Users/donpiano/**/.env.*)",
+      "Read(/Users/donpiano/**/credentials*)",
+      "Read(/Users/donpiano/**/.ssh/**)",
+      "Read(/Users/donpiano/**/*.key)",
+      "Read(/Users/donpiano/**/*.pem)",
+      "Read(/Users/donpiano/Library/Keychains/**)",
       "Bash(* > *)",
       "Bash(* >> *)",
-      "Bash(rm *)",
-      "Bash(git push*)",
-      "Bash(git reset*)",
-      "Bash(git commit*)",
-      "Bash(git filter-repo*)",
-      "Bash(git clone*)",
-      "Bash(git pull*)",
-      "Bash(git fetch*)",
-      "Bash(launchctl *)",
-      "Bash(pkill*)",
-      "Bash(kill *)",
-      "Bash(pmset *)",
-      "Bash(shutdown*)",
-      "Bash(reboot*)",
-      "Bash(sudo *)",
-      "Bash(chmod *)",
-      "Bash(chown *)",
+      "Bash(* | tee *)",
       "Bash(curl *)",
       "Bash(wget *)",
       "Bash(nc *)",
+      "Bash(ncat *)",
       "Bash(ssh *)",
       "Bash(scp *)",
       "Bash(rsync *)",
@@ -2276,42 +2277,47 @@ Auto-memory handling in the SDK subprocess is steered by:
       "Bash(open *)",
       "Bash(tailscale *)",
       "Bash(gh *)",
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(chmod *)",
+      "Bash(chown *)",
+      "Bash(sudo *)",
+      "Bash(git push*)",
+      "Bash(git reset*)",
+      "Bash(git commit*)",
+      "Bash(git filter-repo*)",
+      "Bash(git rebase*)",
+      "Bash(launchctl *)",
+      "Bash(pkill*)",
+      "Bash(kill *)",
+      "Bash(pmset *)",
+      "Bash(shutdown*)",
+      "Bash(reboot*)",
+      "Bash(security *)",
       "Bash(base64 *)",
+      "Bash(xxd *)",
       "Bash(env)",
       "Bash(printenv*)",
-      "Bash(defaults *)",
-      "Bash(security *)",
-      "Bash(python* *)",
-      "Bash(node *)",
-      "Bash(bun *)",
-      "Bash(npm *)",
-      "Bash(npx *)",
-      "Bash(uv *)",
-      "Read(**/.env)",
-      "Read(**/.env.*)",
-      "Read(**/.ssh/**)",
-      "Read(**/*.key)",
-      "Read(**/*.pem)",
-      "Read(Library/Keychains/**)",
-      "Read(**/credentials*)",
-      "Read(**/id_rsa*)",
-      "Read(**/id_ed25519*)",
       "Write",
       "Edit",
       "mcp__plugin_discord_discord__reply",
       "mcp__plugin_discord_discord__edit_message",
-      "mcp__plugin_discord_discord__react"
+      "mcp__plugin_discord_discord__react",
+      "mcp__plugin_discord_discord__download_attachment"
     ]
   }
 }
 ```
 
 Rationale:
-- **Read-only file access** — inspect, don't write. If voice-Kael wants to change something, Miro can tell text-Kael via terminal.
-- **Read-only shell** — explicit allowlist for safe read commands; everything destructive (`rm`, `kill`, `sudo`, `chmod`, mutation HTTP verbs) is denied. Shell redirection (`>`, `>>`) is denied so voice can't smuggle writes past the Write/Edit deny.
+
+- **Path-scoped Read rather than blanket Read.** The allowlist names the six directories voice-Kael needs: KaelVault (knowledge), auto-memory (preferences), CLAUDE.md (rules), KaelVoice (self-inspection), music-taste-profile (the Suno/lyric project — added 2026-04-21 so voice-Kael can answer lyric/production questions from memory), and /tmp (staging). Everything outside those paths is an implicit deny because of `defaultMode: dontAsk`.
+- **Read-only shell** — tiny allowlist of safe read commands (`ls`, `date`, `pwd`, `wc`, `git status|log|diff|branch|show`). Everything destructive is explicitly denied. Redirection (`>`, `>>`, `| tee`) is denied so voice can't smuggle writes past the `Write`/`Edit` deny. No language runtimes (`python`, `node`, `bun`, `npm`, `npx`, `uv`) — no arbitrary code execution.
 - **Read-only git** — no pushes, no commits, no resets, no history rewrites, no clones, no pulls.
-- **No network exfil** — `curl`, `wget`, `nc`, `ssh`, `scp`, `rsync`, `osascript`, `open`, `tailscale`, `gh` all denied. Even GET requests are blocked so a pipeline of Read → Bash(curl POST) can't leak auto-memory contents.
-- **Secret paths denied for Read** — `.env`, `.ssh/**`, `*.key`, `*.pem`, `Library/Keychains/**`, credentials files.
+- **No network exfil** — `curl`, `wget`, `nc`, `ncat`, `ssh`, `scp`, `rsync`, `osascript`, `open`, `tailscale`, `gh` all denied. Even GET requests are blocked so a pipeline of Read → Bash(curl POST) can't leak auto-memory contents.
+- **Two `~/bin/` CLIs are pre-approved** — `mail-kael` (Gmail inbox/send/read) and `lyrics-kael` (GPT-5.4 lyric generation). These are audited wrappers; voice-Kael can invoke them without prompting. See §9.4.
+- **Secret paths denied for Read** — `.claude/*.env`, channels' `.env`, all `.env*` anywhere in `~`, `.ssh/**`, `*.key`, `*.pem`, `Library/Keychains/**`, credentials files.
 - **Smart Connections MCP is allowed** — voice-Kael can search the vault in real-time mid-conversation.
 - **Discord write operations denied** — the Node.js bridge handles Discord; voice-Kael speaking is the reply.
 - **`defaultMode: dontAsk`** — fail closed on unlisted tools; no permission dialogs mid-conversation.
@@ -2430,9 +2436,9 @@ Package layout:
 - `.venv/` — managed by `uv sync`.
 - `uv.lock` — lockfile.
 
-### 9.2 Kael scripts in `~/bin/` — the four tools
+### 9.2 Kael scripts in `~/bin/` — six tools
 
-All scheduling is launchd-driven (see §6). Each launchd plist calls ONE standalone script — no shell wrappers, no dispatcher. The four scripts live at:
+All scheduling is launchd-driven (see §6). Each launchd plist calls ONE standalone script — no shell wrappers, no dispatcher. The six scripts live at:
 
 | Script | Invoked by | Job |
 |---|---|---|
@@ -2440,6 +2446,8 @@ All scheduling is launchd-driven (see §6). Each launchd plist calls ONE standal
 | `run-deep-dreamer` | `com.kael.deep-dreamer.plist` (daily `03:30`) | Vault maintenance: dedup, fix links, trim MEMORY.md |
 | `kael-health` | `com.kael.health.plist` (always-on daemon) | Serve the health dashboard on Tailscale-bound port 8787 |
 | `sync-blueprint` | manual / future-automated | Copy the 3 architecture docs from the private vault → the public `kael-blueprint` repo |
+| `mail-kael` | text-Kael + voice-Kael (per-request) | Gmail IMAP inbox + SMTP send — an audited wrapper voice-Kael is pre-approved to call |
+| `lyrics-kael` | text-Kael + voice-Kael (per-request) | GPT-5.4 lyric generation for the Suno / music-taste-profile project — same pre-approval |
 
 #### `~/bin/run-dreamer` — executable Python, no shell wrapper
 
@@ -2471,6 +2479,22 @@ Single-file Python HTTP server serving one HTML page. Binds to the Tailscale IP 
 #### `~/bin/sync-blueprint`
 
 Idempotent shell script. Copies the three architecture docs from `~/KaelVault/System/architecture/` to `~/tools/kael-blueprint/` (renamed: `kael-blueprint-for-replication.md` → `BLUEPRINT.md`, `kael-architecture.md` → `ARCHITECTURE.md`, `kael-architecture-diagram-sk.html` → `architecture-diagram-sk.html`). If any file changed, commits + pushes to `github.com/MaoTanx/kael-blueprint` with a message like `sync: blueprint update from vault (YYYY-MM-DD HH:MM) — <changed-files>`. Prints `nothing changed — kael-blueprint is up to date` if no diffs.
+
+#### `~/bin/mail-kael` — Gmail CLI wrapper
+
+Thin Python wrapper around `imaplib` + `smtplib`. Loads credentials from `~/.claude/channels/gmail/.env` (Google App Password auth — NOT OAuth). Three subcommands:
+
+- `mail-kael inbox [--limit N] [--unread]` — list recent messages (UID, from, subject, date)
+- `mail-kael show <uid>` — fetch and print one message body
+- `mail-kael send --to X --subject Y` — send, with stdin as the body
+
+Why a wrapper rather than letting voice-Kael call `python -c ...` directly: **voice-Kael has no Python allowed** (see §7.8 denylist). The wrapper is the only way voice-Kael can interact with email, and its surface area is tiny (three verbs, no eval, no shell). Text-Kael also uses it — one path for both.
+
+#### `~/bin/lyrics-kael` — GPT-5.4 lyric generator
+
+Thin Python wrapper around `music_taste.lyrics_gpt.generate_lyric()` in the music-taste-profile project. One positional argument: a theme. Returns title + lyrics on stdout. Uses `~/.claude/chatgpt.env` for the OpenAI key. Does NOT save to disk — the caller (voice-Kael or text-Kael) handles any downstream persistence.
+
+Same rationale as `mail-kael`: voice-Kael can't exec `python` directly, so the wrapper is the permitted surface. Useful for Suno lyric brainstorms mid-conversation without switching to text-Kael terminal.
 
 #### Archived
 
@@ -2639,6 +2663,17 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 ## 12. Changelog — architectural shifts
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
+
+### 2026-04-21 — Voice-Kael tool expansion, data-source attribution, financial analysis tooling
+
+Incremental additions on top of the 2026-04-20 rebuild:
+
+- **Two new thin wrappers in `~/bin/`.** `mail-kael` (Gmail inbox/show/send via IMAP+SMTP) and `lyrics-kael` (GPT-5.4 lyric generation for the Suno/music-taste-profile project). Both are audited, narrow-surface Python wrappers that voice-Kael is explicitly pre-approved to call. See §9.2.
+- **VoiceKael permissions expanded.** `~/KaelVoice/.claude/settings.json` allowlist gained `Read(/Users/donpiano/tools/music-taste-profile/**)` (so voice-Kael can answer questions about the Suno project from memory) and `Bash(mail-kael *)` + `Bash(lyrics-kael *)`. The denylist tightened in parallel — language runtimes (`python`, `node`, `bun`, `npm`, `npx`, `uv`) explicitly denied so arbitrary code execution is closed even if a wrapper path were to leak. See §7.8 for the full current JSON.
+- **VoiceKael preamble rewritten.** The system prompt now enumerates the pre-approved tools explicitly so the model doesn't hallucinate restrictions. Prior preamble was too sparse and voice-Kael falsely believed it couldn't use its granted tools. See `~/KaelVoice/pipecat/runner.py`.
+- **ClaudeCodeLLMService hardcoded permission_mode removed.** `~/tools/kael-toolkit/src/kael_toolkit/claude_code_llm.py` previously passed `permission_mode="default"` into `ClaudeAgentOptions`, overriding the settings.json `defaultMode: dontAsk`. Removed so scoped settings take effect.
+- **New auto-memory rule: cite data sources.** `feedback_cite_data_sources.md` added. Every chart, table, financial claim, or factual statement must name the exact data source (API endpoint, scrape URL, primary reference) so any disagreement between Miro's own numbers and Kael's output is resolvable. Motivated by multiple real cases (AAPL net-cash-vs-net-debt, TSLA net-cash trajectory, META bond issuance) where silent sources made pushback impossible to adjudicate.
+- **Financial chart tooling established.** Ad-hoc scripts in `/tmp/mag7_chart_png.py`, `/tmp/spx_pe_chart.py`, `/tmp/mag6_spx_pe.py` using Financial Datasets API + multpl.com + macrotrends. Pattern for forthcoming personal finance dashboard (see `System/dashboards/personal-finance-dashboard-design.md`, in progress).
 
 ### 2026-04-20 — Launchd-only scheduling, cursor file, `bypassPermissions`, health dashboard
 
