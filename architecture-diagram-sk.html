@@ -457,28 +457,37 @@
              ================================================================= -->
 
         <!-- Plánovače -->
-        <rect x="30" y="920" width="840" height="150" rx="6" fill="#0f172a"/>
-        <rect x="30" y="920" width="840" height="150" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="450" y="943" fill="white" font-size="12" font-weight="700" text-anchor="middle">Plánovače — automatika na pozadí</text>
-        <text x="450" y="959" fill="#94a3b8" font-size="8" text-anchor="middle">launchd (macOS natívne) pre agentov · crontab len pre shell skripty</text>
+        <rect x="30" y="920" width="840" height="170" rx="6" fill="#0f172a"/>
+        <rect x="30" y="920" width="840" height="170" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="450" y="943" fill="white" font-size="12" font-weight="700" text-anchor="middle">Plánovače — všetko pod launchd</text>
+        <text x="450" y="959" fill="#94a3b8" font-size="8" text-anchor="middle">5 LaunchAgent plist-ov v ~/Library/LaunchAgents/ · crontab prázdny (0 položiek)</text>
 
+        <!-- Row 1 — 3 timed jobs -->
         <rect x="55" y="975" width="260" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
-        <text x="185" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">crontab */30 — auto-commit.sh</text>
-        <text x="185" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">vault → git push (zálohovanie)</text>
+        <text x="185" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd :43 — run-dreamer</text>
+        <text x="185" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">každú hodinu (extrakcia poznatkov)</text>
 
         <rect x="325" y="975" width="260" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
-        <text x="455" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd :43 — dreamer hodinovo</text>
-        <text x="455" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">LaunchAgent plist v ~/Library/LaunchAgents/</text>
+        <text x="455" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd 03:30 — run-deep-dreamer</text>
+        <text x="455" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">denná údržba vault-u</text>
 
         <rect x="595" y="975" width="260" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
-        <text x="725" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd 03:30 — deep-dreamer</text>
-        <text x="725" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">denná údržba vault-u</text>
+        <text x="725" y="990" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd */30 — auto-commit.sh</text>
+        <text x="725" y="1003" fill="#94a3b8" font-size="8" text-anchor="middle">vault → git push každých 30 min</text>
 
-        <!-- POZOR box: cron-vs-launchd gotcha for father's replication -->
-        <rect x="55" y="1021" width="800" height="42" rx="4" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
-        <text x="68" y="1037" fill="#fb7185" font-size="9" font-weight="700">⚠ POZOR — prečo launchd a nie cron:</text>
-        <text x="68" y="1050" fill="white" font-size="8">macOS Keychain (kde sa uchováva Claude login token) je dostupný LEN z GUI session. cron beží mimo GUI session →</text>
-        <text x="68" y="1061" fill="white" font-size="8">Claude CLI tam token nenájde a ticho spadne (exit 1, žiadny stderr). launchd LaunchAgent beží v GUI session → funguje.</text>
+        <!-- Row 2 — 2 always-on daemons -->
+        <rect x="55" y="1014" width="390" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="250" y="1029" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd daemon — kael-health (dashboard)</text>
+        <text x="250" y="1042" fill="#94a3b8" font-size="8" text-anchor="middle">HTTP na Tailscale IP :8787 (health prehľad pre telefón)</text>
+
+        <rect x="455" y="1014" width="400" height="34" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="655" y="1029" fill="white" font-size="10" font-weight="600" text-anchor="middle">launchd daemon — VoiceKael (Node)</text>
+        <text x="655" y="1042" fill="#94a3b8" font-size="8" text-anchor="middle">Discord voice bot · KeepAlive (reštart pri páde)</text>
+
+        <!-- POZOR box: keychain reason for launchd -->
+        <rect x="55" y="1057" width="800" height="28" rx="4" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="68" y="1073" fill="#fb7185" font-size="9" font-weight="700">⚠ POZOR:</text>
+        <text x="120" y="1073" fill="white" font-size="8">macOS cron nemá prístup ku Keychain (kde je Claude token + GitHub token) — úlohy bežia mimo GUI session a ticho zlyhajú. launchd beží v GUI session → funguje.</text>
 
         <!-- GitHub (backup emphasis) -->
         <rect x="900" y="920" width="380" height="150" rx="6" fill="#0f172a"/>
@@ -589,8 +598,10 @@
         </div>
         <ul>
           <li>• <code>claude</code> — hlavná Kael session v termináli</li>
-          <li>• <code>~/bin/run-agents dreamer</code> — manuálny dreamer</li>
-          <li>• <code>~/bin/run-agents deep-dreamer</code> — údržba vault-u</li>
+          <li>• <code>~/bin/run-dreamer</code> — manuálny beh dreamer-a</li>
+          <li>• <code>~/bin/run-deep-dreamer</code> — manuálna údržba vault-u</li>
+          <li>• <code>~/bin/sync-blueprint</code> — publikovať architektúru na GitHub</li>
+          <li>• <code>http://dons-mac-mini:8787</code> — health dashboard (Tailscale)</li>
           <li>• <code>launchctl load ~/Library/LaunchAgents/com.*.plist</code> — plán agenta</li>
           <li>• <code>crontab -e</code> — len shell úlohy (napr. auto-commit)</li>
           <li>• <code>obsidian ~/KaelVault</code> — otvorí vault v Obsidian app</li>
@@ -605,7 +616,8 @@
         </div>
         <ul>
           <li>• 1 aktívny hook (discord-reply-check)</li>
-          <li>• 1 cron (auto-commit) + 2 launchd (dreamer, deep-dreamer)</li>
+          <li>• 5 launchd úloh · 0 cron (všetko v ~/Library/LaunchAgents/)</li>
+          <li>• health dashboard cez Tailscale na porte 8787</li>
           <li>• ~35 súborov v auto-pamäti</li>
           <li>• stovky poznámok v KaelVault-e</li>
           <li>• GitHub zálohuje každých 30 minút</li>
@@ -700,8 +712,28 @@
       </div>
 
       <div class="gloss-card gl-own">
-        <div class="gloss-name">run-agents <span class="src-tag src-own">Vlastné</span></div>
-        <div class="gloss-desc">Python wrapper, ktorý cron-y používajú na spustenie dreamer / deep-dreamer — vyberie správne session-y na spracovanie a odovzdá SDK potrebné povolenia.</div>
+        <div class="gloss-name">run-dreamer <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Python skript (~/bin/run-dreamer), ktorý launchd spúšťa každú hodinu. Číta kurzor z cursors.json, vypočíta deltu, zavolá dreamer agenta a po úspechu atomicky zapíše nové kurzory.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">run-deep-dreamer <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Python skript, ktorý launchd spúšťa denne o 03:30. Zavolá deep-dreamer agenta pre celovaultovú údržbu (duplikáty, wikilinky, MEMORY.md, stale noty).</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">kael-health <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Python HTTP server (~/bin/kael-health), ktorý beží ako launchd daemon a zobrazuje health dashboard na Tailscale IP :8787. Na telefóne pridajte cez Safari na plochu.</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">sync-blueprint <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">Shell skript, ktorý kopíruje 3 architektonické dokumenty z privátneho vault-u do verejného kael-blueprint repo na GitHube (aby ich Miro mohol zdieľať s otcom / rodinou).</div>
+      </div>
+
+      <div class="gloss-card gl-own">
+        <div class="gloss-name">cursors.json <span class="src-tag src-own">Vlastné</span></div>
+        <div class="gloss-desc">JSON súbor v ~/.claude/dreamer-state/, kde run-dreamer udržuje offset každého session transcriptu. Atomicky sa aktualizuje LEN po úspešnom behu agenta — ak agent zlyhá, nasledujúci beh skúsi tú istú deltu znova.</div>
       </div>
 
       <div class="gloss-card gl-own">
