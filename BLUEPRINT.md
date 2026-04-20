@@ -61,18 +61,18 @@ A Claude Code assistant with **three memory layers**, a **knowledge vault**, and
              │   hourly     │   daily      │
              ▼              ▼              │
       ┌──────────────┐ ┌──────────────┐    │
-      │  DREAMER     │ │ DEEP-DREAMER │    │
-      │  (cron :15)  │ │ (cron 03:30) │    │
-      │  extracts    │ │ dedupes /    │    │
-      │  knowledge   │ │ validates /  │    │
-      │  from JSONL  │ │ trims index  │    │
-      └──────────────┘ └──────────────┘    │
-                                            │
-      ┌─────────────────────────────────────▼──────┐
-      │ Auto-commit (cron */30): mirror CLAUDE.md  │
-      │ + memory/ into vault, secret-scan staged   │
-      │ diff, then git commit + push.              │
-      └────────────────────────────────────────────┘
+      │  DREAMER        │ │ DEEP-DREAMER   │ │
+      │  (launchd :43)  │ │ (launchd 03:30)│ │
+      │  extracts       │ │ dedupes /      │ │
+      │  knowledge      │ │ validates /    │ │
+      │  from JSONL     │ │ trims index    │ │
+      └─────────────────┘ └────────────────┘ │
+                                              │
+      ┌───────────────────────────────────────▼──────┐
+      │ Auto-commit (launchd every 30 min): mirror   │
+      │ CLAUDE.md + memory/ into vault, secret-scan  │
+      │ staged diff, then git commit + push.         │
+      └──────────────────────────────────────────────┘
 ```
 
 ### The three memory layers
@@ -98,7 +98,7 @@ The dreamer and deep-dreamer are Claude-Code-spawned agents that maintain these 
 | Three-layer memory (constitution / auto-memory / vault) | What memories you save |
 | Dreamer + deep-dreamer agents | How often they run |
 | Vault + Daily / People / System / _config folders | What domain folders you add (work, hobbies, projects) |
-| Auto-commit cron with secret-scan | Which cloud you push to |
+| Auto-commit with secret-scan (via launchd) | Which cloud you push to |
 | Discord plugin for phone access | Which plugins you install beyond that |
 | Trust hierarchy (terminal trusted, Discord owner trusted, others untrusted) | Your Discord user_id + policy |
 | Hook-based enforcement of "forgettable" rules | Which rules matter enough to hook |
@@ -185,13 +185,19 @@ Use `<your-vault-dir>` to mean whatever you name your vault directory (e.g. `~/M
 │       └── .venv/
 │
 ├── bin/                           # Your personal bin (must be on $PATH)
-│   ├── run-agents                 # §13 — CLI to fire dreamer via SDK
-│   ├── run-dreamer-cron           # §13 — cron wrapper
-│   └── run-deep-dreamer-cron      # §13 — cron wrapper
+│   ├── run-dreamer                # §13 — single Python script, hourly
+│   ├── run-deep-dreamer           # §13 — single Python script, daily 03:30
+│   ├── kael-health                # §13 — Tailscale-bound dashboard daemon
+│   └── sync-blueprint             # §13 — push architecture docs to public repo
+│
+├── .claude/dreamer-state/         # NEW — wrapper-owned cursor state
+│   └── cursors.json               # per-session line offset; atomically updated
 │
 └── Library/LaunchAgents/          # macOS launchd (replace with systemd units on Linux)
-    ├── com.yourtoolkit.dreamer.plist     # (§14)
-    └── com.yourtoolkit.deep-dreamer.plist
+    ├── com.yourtoolkit.dreamer.plist        # (§14)
+    ├── com.yourtoolkit.deep-dreamer.plist
+    ├── com.yourtoolkit.auto-commit.plist
+    └── com.yourtoolkit.health.plist
 ```
 
 ### Finding the auto-memory directory path
@@ -222,9 +228,9 @@ Do these in order. Each step assumes the previous one is done.
 7. **Write the dreamer and deep-dreamer agent files** (§11) into `~/.claude/agents/`.
 8. **Install the Discord reply hook** (§10) — `~/.claude/hooks/discord_reply_check.py` + `settings.json`.
 9. **Set up the shared toolkit** (§13) — `~/tools/yourtoolkit/` with `uv sync`.
-10. **Write the `run-agents` CLI and cron wrappers** (§13).
+10. **Write the four scripts in `~/bin/`** (§13) — `run-dreamer`, `run-deep-dreamer`, `kael-health`, `sync-blueprint`.
 11. **Install and test Smart Connections MCP** (§5.4).
-12. **Wire crons and launchd** (§14).
+12. **Wire launchd plists** (§14).
 13. **Set up the Discord bot** (§6.2) — create application, get token, configure plugin.
 14. **Test each component** (§15).
 
@@ -604,7 +610,7 @@ Hooks are shell commands fired by the Claude Code runtime at lifecycle points (P
 
 Don't add hooks for everything. The reference system started with 4 separate hook actions, then pruned to 1 after several proved redundant or net-negative:
 - PreCompact reminders are unnecessary — session transcripts are append-only on disk, nothing is lost at context compaction.
-- Stop reminders to spawn the dreamer are redundant with the cron that runs anyway.
+- Stop reminders to spawn the dreamer are redundant with the hourly launchd job that runs anyway.
 - UserPromptSubmit embeddings (for proactive domain context) add ~50-100 ms latency on every prompt; rarely worth it unless you have many well-tuned domain clusters.
 
 Keep only hooks that enforce a real behavioral rule the model consistently gets wrong without them.
@@ -792,7 +798,7 @@ Agent definitions live at `~/.claude/agents/<name>.md`. Each is a YAML-frontmatt
 
 ### 11.1 Dreamer agent (`~/.claude/agents/dreamer.md`)
 
-The dreamer processes session transcripts into vault notes. Hourly cron fire; reads only the delta since the last run; extracts knowledge, updates People notes, writes to the daily note, logs to `log.md`.
+The dreamer processes session transcripts into vault notes. Hourly launchd fire; reads only the delta since the last run (wrapper-owned cursor file); extracts knowledge, updates People notes, writes to the daily note, logs to `log.md`.
 
 ```markdown
 ---
@@ -1090,7 +1096,7 @@ Keep it concise. If the answer is simple, don't pad it.
 ```bash
 #!/bin/bash
 # Mirror CLAUDE.md + auto-memory into vault, secret-scan staged diff, commit + push.
-# Runs every 30 minutes via cron. Safe to run overlapping invocations (git serializes refs).
+# Runs every 30 minutes via launchd. Safe to run overlapping invocations (git serializes refs).
 
 set -u  # but not -e — we want to log failures, not exit silently
 
@@ -1336,14 +1342,14 @@ claude mcp list
 | Component | Command | When |
 |---|---|---|
 | Main Claude Code session | `kael` (alias above) | Your primary way to talk to the assistant |
-| Dreamer — manual run | `~/bin/run-agents dreamer` | When you want the vault updated NOW (otherwise hourly cron) |
-| Deep-dreamer — manual | `~/bin/run-agents deep-dreamer` | When you want vault maintenance NOW (otherwise 03:30 cron) |
-| List recent sessions | `~/bin/run-agents list-sessions` | Debugging — see which sessions the SDK enumerates |
+| Dreamer — manual run | `~/bin/run-dreamer` | When you want the vault updated NOW (otherwise hourly via launchd) |
+| Deep-dreamer — manual | `~/bin/run-deep-dreamer` | When you want vault maintenance NOW (otherwise 03:30 via launchd) |
 | Open vault in GUI | `obsidian ~/YourVault/` | When you want to read/edit vault visually |
 | Vault manual push | `cd ~/YourVault && ~/YourVault/.auto-commit.sh` | Force a commit-push cycle |
 | Restore vault from GitHub | `gh repo clone <your-gh-user>/YourVault ~/YourVault` | Fresh Mac, or after catastrophic loss |
-| View cron history | `crontab -l` | See scheduled jobs |
-| Edit cron | `crontab -e` | Add/remove scheduled jobs |
+| List launchd jobs | `launchctl list \| grep yourtoolkit` | See scheduled/daemon jobs |
+| Kick a launchd job | `launchctl kickstart -p gui/$(id -u)/com.yourtoolkit.dreamer` | Force fire NOW (bypasses schedule) |
+| Reload a plist after edit | `launchctl unload PATH && launchctl load PATH` | Pick up edits to `.plist` files |
 | See dreamer logs | `tail -50 ~/.claude/logs/dreamer.log` | Debug why dreamer isn't doing something |
 | See auto-commit logs | `tail -50 ~/.claude/logs/auto-commit.log` | Debug why vault isn't pushing |
 | Hook reload | `/hooks` inside Claude Code | Pick up settings.json hook changes without restarting |
@@ -1352,8 +1358,8 @@ claude mcp list
 
 - **Morning:** operator opens Discord on phone, sees what Kael captured overnight (dreamer ran hourly while Mac was on). Talks to Kael about today's plan. Current Tasks.md gets updated.
 - **During work:** operator pings Kael through Discord for specific tasks — "pull this PR", "analyze these logs", "write this email to X", etc. Kael has full tool access.
-- **After compile / large work:** operator never manually commits the vault. The `*/30 min` cron handles it.
-- **Before traveling / switching machines:** no special action — GitHub has everything via the auto-commit cron, pull it down on the other side.
+- **After compile / large work:** operator never manually commits the vault. The launchd auto-commit every 30 min handles it.
+- **Before traveling / switching machines:** no special action — GitHub has everything via the auto-commit launchd job, pull it down on the other side.
 - **Troubleshooting:** if something feels off, operator checks three logs in order: `~/.claude/logs/dreamer.log` (knowledge not captured?), `~/.claude/logs/auto-commit.log` (vault not pushing?), `~/Library/LaunchAgents/*.log` (if voice or other launchd services).
 
 ### 15.5 Patterns the operator relies on
@@ -1368,9 +1374,9 @@ claude mcp list
 ### 15.6 Things the operator deliberately does NOT do
 
 - **Does not manually edit vault markdown during conversations.** The dreamer does that. The only vault file the operator edits directly is `~/YourVault/Current Tasks.md` (by explicit CLAUDE.md exception).
-- **Does not commit the vault manually.** The cron handles it.
-- **Does not manually copy auto-memory to the vault mirror.** The `auto-commit.sh` script does that each cron fire.
-- **Does not run the dreamer inline during a working session** (too slow, burns the session's budget). The cron does it between sessions.
+- **Does not commit the vault manually.** The launchd auto-commit job handles it every 30 min.
+- **Does not manually copy auto-memory to the vault mirror.** `auto-commit.sh` does that on each launchd fire.
+- **Does not run the dreamer inline during a working session** (too slow, burns the session's budget). The launchd job does it between sessions.
 - **Does not disable the Discord-reply hook.** It's the one hook that enforces a real rule Kael would otherwise forget (always reply on Discord when the message came from Discord, not just to terminal).
 
 ---
@@ -1454,22 +1460,25 @@ tail -5 ~/.claude/logs/auto-commit.log
 rm ~/<your-vault-dir>/_scratch_test.md
 ```
 
-### 15.8 launchd / cron
+### 15.8 launchd
 
 ```bash
 # Inspect launchd jobs
 launchctl list | grep yourtoolkit
 
-# Force a run
-launchctl start com.yourtoolkit.dreamer
-tail -f ~/.claude/logs/dreamer-launchd.log
+# Inspect one job in detail (state, pid, last exit code)
+launchctl print gui/$(id -u)/com.yourtoolkit.dreamer
+
+# Force a run NOW (bypasses the schedule)
+launchctl kickstart -p gui/$(id -u)/com.yourtoolkit.dreamer
+tail -f ~/.claude/logs/dreamer.log
 ```
 
-For cron:
+If a job was modified (plist edited), reload with unload + load:
 
 ```bash
-crontab -l
-grep CRON /var/log/system.log  # macOS (may need cron logging enabled)
+launchctl unload ~/Library/LaunchAgents/com.yourtoolkit.dreamer.plist
+launchctl load   ~/Library/LaunchAgents/com.yourtoolkit.dreamer.plist
 ```
 
 ---
@@ -1576,7 +1585,7 @@ Don't do:
 - Three-layer memory: constitution + auto-memory + vault.
 - Dreamer + deep-dreamer split (hourly delta extraction + daily maintenance).
 - Shell-owned `last_dreamer_run` / agent-owned per-file counters.
-- Atomic-mkdir lock for cron jobs.
+- Atomic-mkdir lock for scheduled jobs.
 - `_config/` mirror of CLAUDE.md + auto-memory inside the vault (recovery path).
 - Auto-commit with secret scan.
 - Trust hierarchy (terminal trusted / verified-user trusted / other-user untrusted / web untrusted).

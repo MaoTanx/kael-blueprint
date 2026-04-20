@@ -17,7 +17,7 @@ Kael is a **multi-process AI assistant** running on one machine, organized aroun
 
 1. **Text-Kael** — the primary `claude` CLI in a terminal. Talks to Miro on Discord (via the `discord` plugin) and in the terminal directly. Has full tool access (Read/Write/Edit/Bash/MCP/WebFetch/WebSearch/etc.), the superpowers skill suite, and custom agents. This is the "main" Kael.
 2. **Voice-Kael** — a launchd-managed Node.js bot (`~/KaelVoice/index.js`) that joins Discord voice and bridges audio to a Python Pipecat pipeline (`~/KaelVoice/pipecat/runner.py`). When `VOICEKAEL_AUTH=oauth` (the current mode), Pipecat delegates the LLM turn to a subprocess `ClaudeSDKClient` running in the VoiceKael project directory — so voice-Kael has the same tool stack as text-Kael, but scoped by a strict allow/deny list and a terse voice preamble. Voice-Kael loads the **same full auto-memory** as text-Kael (identity parity is the explicit design choice).
-3. **Dreamer loops** — two launchd-triggered cron agents. The hourly **dreamer** reads the delta from every session JSONL (text + voice) and extracts knowledge into `~/KaelVault/`. The daily **deep-dreamer** (3:30 am) performs vault maintenance — merges duplicates, flags stale notes, fixes wikilinks, trims MEMORY.md.
+3. **Dreamer loops** — two launchd-triggered background agents. The hourly **dreamer** reads the delta from every session JSONL (text + voice) and extracts knowledge into `~/KaelVault/`. The daily **deep-dreamer** (03:30) performs vault maintenance — merges duplicates, flags stale notes, fixes wikilinks, trims MEMORY.md.
 
 All three write into the same stores:
 - **`~/KaelVault/`** — Obsidian markdown vault, git-backed (github.com/MaoTanx/KaelVault, private), auto-committed every 30 min. Indexed by Smart Connections MCP (bge-micro-v2 embeddings).
@@ -76,30 +76,30 @@ CLAUDE.md is the "constitution" role — not just "one config file among many". 
       │ hourly       │ continuous   │             │ hourly (same dreamer)
       ▼              ▼              │             ▼
  ┌────────────────────────────┐     │        (voice sessions
- │  DREAMER  (launchd :15)    │     │          processed too)
- │  ~/bin/run-dreamer-cron    │     │
- │  → run-agents dreamer      │     │
+ │  DREAMER  (launchd :43)    │     │          processed too)
+ │  ~/bin/run-dreamer         │     │
+ │  reads cursors.json →      │     │
  │  spawns SDK agent (sonnet) │─────┘ writes/updates
- │  scoped perms, not bypass  │       → vault notes
+ │  bypassPermissions + deny  │       → vault notes
  └─────┬──────────────────────┘       → People/*.md
        │                              → MEMORY index
        │ writes log.md, daily notes
        ▼
  ┌────────────────────────────┐
- │ DEEP-DREAMER (launchd 3:30)│  dedupe, stale flagging, wikilink fixes,
- │  ~/bin/run-deep-dreamer... │  MEMORY.md trim, index.md validation
+ │ DEEP-DREAMER (launchd 03:30)│ dedupe, stale flagging, wikilink fixes,
+ │  ~/bin/run-deep-dreamer    │  MEMORY.md trim, index.md validation
  └─────┬──────────────────────┘
        │
        ▼
  ┌────────────────────────────┐
- │ auto-commit  (cron */30)   │  cp CLAUDE.md, memory/*.md → vault/_config/
+ │ auto-commit (launchd */30) │  cp CLAUDE.md, memory/*.md → vault/_config/
  │ ~/KaelVault/.auto-commit.sh│  secret-scan staged diff, then commit+push
  └────────────────────────────┘
 
 Smart Connections MCP ←── indexes KaelVault/ ── reads ──> text-Kael / voice-Kael
 ```
 
-Every launchd / cron job is lockfile-guarded, logs to `~/.claude/logs/`, and only fires one instance at a time.
+Every launchd job is lockfile-guarded, logs to `~/.claude/logs/`, and only fires one instance at a time.
 
 ## 2. Memory architecture
 
@@ -141,7 +141,7 @@ The specific file names and contents are personal to each operator — the ARCHI
 
 ### 2.3 KaelVault
 
-Path: `~/KaelVault/`. Obsidian vault. Private git repo at `github.com/MaoTanx/KaelVault`. Auto-commits every 30 min via cron (see §6).
+Path: `~/KaelVault/`. Obsidian vault. Private git repo at `github.com/MaoTanx/KaelVault`. Auto-commits every 30 min via launchd (see §6).
 
 Fixed folders: `Daily/` (daily logs), `People/` (Miro, Kael, Interaction-Dynamics), `System/` (architecture, tooling catalogs — this doc lives here), `_config/` (auto-synced mirror of CLAUDE.md and memory/). Every other folder is organic.
 
@@ -686,7 +686,7 @@ Hooks live in `~/.claude/settings.json`. They're shell commands fired by the Cla
 Current state: **one active hook.** The system was pruned from 4 separate hook actions down to 1 during the 2026-04-19 cleanup after several were determined to be redundant or net-negative:
 
 - PreCompact dreamer reminder — removed. Session JSONL on disk is append-only and unaffected by in-memory context compaction; nothing is lost at compaction time for the dreamer to rescue.
-- Stop dreamer reminder — removed. Redundant with the hourly cron.
+- Stop dreamer reminder — removed. Redundant with the hourly launchd job.
 - UserPromptSubmit `domain_recall.py` — removed. ~50-100 ms latency on every prompt, rare hits at current domain-summary coverage, net-negative ROI. Script file kept on disk for easy re-enable.
 
 Only the Discord reply check remains, because it enforces a real behavioral rule the model consistently forgets, not a defensive reminder.
@@ -2626,7 +2626,7 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 
 - **Health dashboard / silent-failure detector.** No single place to see "dreamer ran, deep-dreamer ran, voicekael alive, vault pushed in last N minutes". Silent failures surface only when noticed. Parked per Miro's explicit "later". First consumer of heartbeat hooks if/when they're built.
 - **Smart Connections MCP fallback.** Single point of "brain failure" — if the MCP is down or embeddings drift, `semantic_search` silently returns empty and Kael falls back to training-memory guesses. Design needed for a grep-over-index retrieval fallback.
-- **Shared-state ownership refactor (50% done).** `last_dreamer_run` is now shell-owned. Per-file `lines_processed` counters still live in YAML frontmatter where concurrent writers (cron dreamer + deep-dreamer + any manually-triggered dreamer) can race. Proper fix: move to `~/.claude/state/dreamer-counters.json` with atomic rename writes.
+- **(Resolved 2026-04-20)** Shared-state ownership refactor — previously `lines_processed` counters lived in YAML frontmatter; now in `~/.claude/dreamer-state/cursors.json` atomically written by the wrapper. See §2.4 and §12 for the migration.
 - **`voicekael-live.jsonl` rotation.** No rotation yet; append-only growth. Low priority given current voice usage volume.
 - **LatencyObserver id-reuse quirk.** `_seen_frames` uses `id(frame)` with a 500-item clear; GC-reused IDs can theoretically double-count. Low impact in practice.
 - **Pricing table rot.** Hardcoded `UsageLogger.PRICING` dict will drift as Anthropic updates rates. No automated refresh.
