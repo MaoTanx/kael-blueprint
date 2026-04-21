@@ -1045,6 +1045,14 @@ Each page load gathers live state from local files:
 
 HTML auto-refreshes every 60s via `<meta refresh>`. JSON endpoint at `/health.json` for any future automation.
 
+**Age-badge coloring rule.** The dashboard has two coloring paths for "X ago" badges:
+
+- `fmt_age_scheduled(ts, interval_secs)` — used for *scheduled* jobs (dreamer, deep-dreamer). Green while `age < interval`, yellow if one cycle missed (or run may be in-flight), red for multiple misses. Only the most recent row of each section is colored by schedule; older rows are gray (history, not a health signal).
+- `fmt_age(ts)` — used for *unscheduled* state where absolute age does convey staleness (git repo last-commit, recent-failure timestamps).
+- **Gray (informational only)** — for architecture-doc section: per-doc age and per-trigger age are gray because the STALE/FRESH banner (doc mtime vs watched-file mtimes) is the actual health signal; absolute age there is just context. Also for dreamer-queue entries with `delta == 0` (inactive session; how old the file is tells you nothing about pipeline health).
+
+Rule of thumb applied to future additions: **color by schedule violation or drift, not by time-since**. A value being "old" is a health signal only when there's a specific schedule or SLA it's violating.
+
 ## 7. VoiceKael
 
 VoiceKael is the real-time voice interface. It's the most complex piece of the stack because it combines three streaming services (STT, LLM, TTS), handles live bidirectional audio, and (in the current `oauth` mode) delegates its LLM turn to an out-of-process Claude Code SDK subprocess.
