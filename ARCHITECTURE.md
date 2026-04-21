@@ -664,6 +664,31 @@ The superpowers plugin is enabled in `~/.claude/settings.json`. The skills below
 - **writing-skills** — for creating, editing, or verifying new skills before deployment.
 - **using-superpowers** — meta-skill that teaches Kael how to find and use the rest of the suite. Required invocation at the start of any conversation.
 
+### 4.3b Anthropic-official skills (from `anthropics/skills` marketplace)
+
+Added 2026-04-21. Two plugin bundles from the Anthropic-managed `anthropic-agent-skills` marketplace (install path: `claude plugin marketplace add anthropics/skills` then `claude plugin install <bundle>@anthropic-agent-skills`):
+
+**`document-skills@anthropic-agent-skills`** — the four office-document skills that power Claude's native document features. Source-available (not fully open-source) but usable. Each is a specialized workflow with scripts/templates under the hood:
+
+- **`pdf`** — parse, extract, and manipulate PDFs (forms, text, images). Direct relevance: SEC 10-K/10-Q filings for the finance work.
+- **`docx`** — read/write/modify Word documents.
+- **`xlsx`** — read/write spreadsheets, handle formulas, preserve formatting.
+- **`pptx`** — build/edit PowerPoint decks. Direct relevance: turning financial analysis into board-deck slides.
+
+**`example-skills@anthropic-agent-skills`** — despite the name, these are fully-functional skills, not just references. "Example" is Anthropic's label for "showing what's possible beyond the 4 document ones". 13 skills in this bundle; the ones relevant to Kael's work:
+
+- **`frontend-design`** — build/style frontend UIs. Direct use: the personal finance dashboard roadmapped under `System/dashboards/`.
+- **`skill-creator`** — framework for creating new custom skills systematically. Useful for making bespoke Kael-only skills.
+- **`mcp-builder`** — build new MCP servers.
+- **`webapp-testing`** — browser-level testing workflows.
+- **`claude-api`** — Claude API usage helper.
+- **`doc-coauthoring`** — collaborative document editing workflows.
+- **`brand-guidelines`** — enforce brand styling (probably low relevance for Miro personally).
+- **`internal-comms`** — draft announcements, memos.
+- **`theme-factory`**, **`algorithmic-art`**, **`canvas-design`**, **`slack-gif-creator`**, **`web-artifacts-builder`** — creative/design skills, low Kael-use for now.
+
+All 17 skills are installed; Claude Code loads each one on demand when its trigger pattern matches, so carrying the full set has zero runtime cost.
+
 ### 4.4 Native Claude Code skills
 
 These ship with the `claude` CLI itself and are always available:
@@ -2354,7 +2379,11 @@ Claude Code merges settings in this order (later wins for most fields; permissio
 {
   "enabledPlugins": {
     "discord@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true
+    "superpowers@claude-plugins-official": true,
+    "financial-analysis@financial-services-plugins": true,
+    "equity-research@financial-services-plugins": true,
+    "document-skills@anthropic-agent-skills": true,
+    "example-skills@anthropic-agent-skills": true
   },
   "skipDangerousModePermissionPrompt": true,
   "hooks": {
@@ -2678,6 +2707,8 @@ Incremental additions on top of the 2026-04-20 rebuild:
 
 - **Dashboard age-badge coloring is now schedule-aware.** Previously `fmt_age()` colored badges purely by absolute age → a dreamer that last ran 2 h ago showed yellow/red even though hourly schedule means that's just the "between fires" state. New `fmt_age_scheduled(ts, interval_secs)` colors green while `age < interval`, yellow one missed cycle, red for multiple misses. Applied to dreamer (hourly) and deep-dreamer (daily). Only the most recent row is colored by schedule; older rows are gray history. Architecture-doc section ages are also gray (the STALE/FRESH banner is the health signal, per-row age is informational).
 - **Dashboard "Actions taken" column for agent runs.** Each dreamer / deep-dreamer row now has an Actions cell summarizing what the run actually did: counts of Write / Edit / Bash / commit / push, with an expandable `<details>` block listing every file touched, commit SHA, push target, and the agent's final text summary. Extraction is parsing of the existing per-message log lines in `dreamer.log` / `deep-dreamer.log` (no logger schema change). Gives you post-hoc visibility into what the silent hourly agent actually produced.
+- **Anthropic-official skills marketplace added.** `claude plugin marketplace add anthropics/skills` registers the `anthropic-agent-skills` marketplace; then `/plugin install document-skills@anthropic-agent-skills` adds the four source-available office-doc skills (`pdf`, `docx`, `xlsx`, `pptx`) that power Claude's native document features, and `/plugin install example-skills@anthropic-agent-skills` adds 13 further skills including `frontend-design`, `skill-creator`, `mcp-builder`, `webapp-testing`, and `claude-api`. These coexist with the existing `superpowers` bundle and the two `financial-services-plugins` (`financial-analysis`, `equity-research`). All loaded on-demand via trigger patterns, zero baseline runtime cost. See §4.3b.
+- **Evaluated `find-skills` (Vercel Labs community skill) and declined.** Post on X framed it as "the real key to Claude Code"; turned out to be a discovery meta-skill from `vercel-labs/skills`, not Anthropic. Anthropic's sanctioned discovery path is the built-in `/plugin` slash command + `claude plugin marketplace` CLI, which is what was used above. No need to add the community layer.
 
 - **Two new thin wrappers in `~/bin/`.** `mail-kael` (Gmail inbox/show/send via IMAP+SMTP) and `lyrics-kael` (GPT-5.4 lyric generation for the Suno/music-taste-profile project). Both are audited, narrow-surface Python wrappers that voice-Kael is explicitly pre-approved to call. See §9.2.
 - **VoiceKael permissions expanded.** `~/KaelVoice/.claude/settings.json` allowlist gained `Read(/Users/donpiano/tools/music-taste-profile/**)` (so voice-Kael can answer questions about the Suno project from memory) and `Bash(mail-kael *)` + `Bash(lyrics-kael *)`. The denylist tightened in parallel — language runtimes (`python`, `node`, `bun`, `npm`, `npx`, `uv`) explicitly denied so arbitrary code execution is closed even if a wrapper path were to leak. See §7.8 for the full current JSON.

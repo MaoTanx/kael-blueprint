@@ -273,11 +273,26 @@ claude plugin install superpowers@claude-plugins-official
 
 Purely additive. You can skip this entirely and the rest of the system works. It mostly pays off for users who do engineering work with the assistant.
 
-### 5.3 Anything else
+### 5.3 Anthropic-official skills marketplace (optional but very useful)
 
-Claude Code's plugin ecosystem grows. The blueprint doesn't depend on any specific plugin beyond Discord — add others (`claude_ai_Google_Drive`, `chrome-devtools`, etc.) as your use cases warrant. They're orthogonal to the memory architecture.
+Anthropic maintains its own skills repository at `github.com/anthropics/skills`, exposing two plugin bundles:
 
-### 5.4 Smart Connections MCP
+```bash
+claude plugin marketplace add anthropics/skills
+claude plugin install document-skills@anthropic-agent-skills
+claude plugin install example-skills@anthropic-agent-skills
+```
+
+- **`document-skills`** — `pdf`, `docx`, `xlsx`, `pptx`. The four office-document skills that power Claude's native document features. Source-available (not fully open-source) but usable. Essential if you work with PDF / Word / Excel / PowerPoint files — covers the ingestion and generation of all four.
+- **`example-skills`** — 13 further skills including `frontend-design`, `skill-creator`, `mcp-builder`, `webapp-testing`, `claude-api`. The name is misleading — these are fully functional, not just references. Useful if you build frontends, write new skills, or make MCP servers.
+
+Both are zero-cost at runtime — skills load on-demand when their trigger pattern matches user intent.
+
+### 5.4 Anything else
+
+Claude Code's plugin ecosystem grows. The blueprint doesn't require anything beyond Discord — add others (`claude_ai_Google_Drive`, `chrome-devtools`, `financial-services-plugins`, etc.) as your use cases warrant. They're orthogonal to the memory architecture.
+
+### 5.5 Smart Connections MCP
 
 Smart Connections is an Obsidian plugin that exposes an MCP server with three tools: `semantic_search`, `find_related`, `get_context_blocks`. Claude Code talks to it to retrieve vault notes by meaning rather than keyword.
 
