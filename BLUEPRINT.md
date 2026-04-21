@@ -123,6 +123,7 @@ Install these first. Versions listed are what the reference system uses; anythin
 | **Smart Connections MCP** | Vault semantic search (embeddings + retrieval) | See §5.4 |
 | **`superpowers` plugin** (optional) | Adds brainstorming / TDD / code-review skills | `claude plugin install superpowers@claude-plugins-official` |
 | **`discord` plugin** | Phone access via Discord bot | `claude plugin install discord@claude-plugins-official` |
+| **Tailscale** | Network-level auth for the health dashboard (§13.4) — binds port 8787 to the Tailscale IP so only devices in your tailnet can reach it. Also convenient for remote `ssh` to the Mac from your phone. | `brew install --cask tailscale` or download from https://tailscale.com/download — then `tailscale up` once to join your tailnet |
 
 No Homebrew or Docker strictly required. The reference system keeps everything in `~/tools/` + `~/bin/` + `~/.claude/` for easy reproducibility.
 
@@ -131,6 +132,7 @@ No Homebrew or Docker strictly required. The reference system keeps everything i
 - **Anthropic account** with a Claude subscription (Pro/Max recommended so the CLI uses OAuth and you don't burn per-token API credits).
 - **GitHub account** for the private vault repo.
 - **Discord account + bot application** (see §6) — only if you want phone access.
+- **Tailscale account** (free personal tier works) — used as the auth layer for the health dashboard. Install on your Mac AND on your phone so the dashboard URL resolves over the tailnet from anywhere.
 
 ---
 
