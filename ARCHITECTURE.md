@@ -2664,9 +2664,11 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
 
-### 2026-04-21 — Voice-Kael tool expansion, data-source attribution, financial analysis tooling
+### 2026-04-21 — Voice-Kael tool expansion, data-source attribution, dashboard UX, financial analysis tooling
 
 Incremental additions on top of the 2026-04-20 rebuild:
+
+- **Dashboard age-badge coloring is now schedule-aware.** Previously `fmt_age()` colored badges purely by absolute age → a dreamer that last ran 2 h ago showed yellow/red even though hourly schedule means that's just the "between fires" state. New `fmt_age_scheduled(ts, interval_secs)` colors green while `age < interval`, yellow one missed cycle, red for multiple misses. Applied to dreamer (hourly) and deep-dreamer (daily). Only the most recent row is colored by schedule; older rows are gray history. Architecture-doc section ages are also gray (the STALE/FRESH banner is the health signal, per-row age is informational).
 
 - **Two new thin wrappers in `~/bin/`.** `mail-kael` (Gmail inbox/show/send via IMAP+SMTP) and `lyrics-kael` (GPT-5.4 lyric generation for the Suno/music-taste-profile project). Both are audited, narrow-surface Python wrappers that voice-Kael is explicitly pre-approved to call. See §9.2.
 - **VoiceKael permissions expanded.** `~/KaelVoice/.claude/settings.json` allowlist gained `Read(/Users/donpiano/tools/music-taste-profile/**)` (so voice-Kael can answer questions about the Suno project from memory) and `Bash(mail-kael *)` + `Bash(lyrics-kael *)`. The denylist tightened in parallel — language runtimes (`python`, `node`, `bun`, `npm`, `npx`, `uv`) explicitly denied so arbitrary code execution is closed even if a wrapper path were to leak. See §7.8 for the full current JSON.
