@@ -1,8 +1,9 @@
 ---
 tags: [architecture, system, memory, voicekael]
 type: architecture
+confidence: confirmed
 created: 2026-04-19
-updated: 2026-04-20
+updated: 2026-04-22
 ---
 
 # Kael System Architecture
@@ -2473,18 +2474,21 @@ Package layout:
 - `.venv/` — managed by `uv sync`.
 - `uv.lock` — lockfile.
 
-### 9.2 Kael scripts in `~/bin/` — six tools
+### 9.2 Kael scripts in `~/bin/` — seven tools
 
-All scheduling is launchd-driven (see §6). Each launchd plist calls ONE standalone script — no shell wrappers, no dispatcher. The six scripts live at:
+All scheduling is launchd-driven (see §6). Each launchd plist calls ONE standalone script — no shell wrappers, no dispatcher. The seven scripts live at:
 
 | Script | Invoked by | Job |
 |---|---|---|
 | `run-dreamer` | `com.kael.dreamer.plist` (hourly `:43`) | Process new session-transcript content into vault knowledge |
 | `run-deep-dreamer` | `com.kael.deep-dreamer.plist` (daily `03:30`) | Vault maintenance: dedup, fix links, trim MEMORY.md |
 | `kael-health` | `com.kael.health.plist` (always-on daemon) | Serve the health dashboard on Tailscale-bound port 8787 |
+| `apple-notes-sync` | `com.kael.apple-notes.plist` (every 15 min) | Pull notes from iCloud "Kael-Sync" shared folder → `~/KaelVault/Work/AppleNotes/` |
 | `sync-blueprint` | manual / future-automated | Copy the 3 architecture docs from the private vault → the public `kael-blueprint` repo |
 | `mail-kael` | text-Kael + voice-Kael (per-request) | Gmail IMAP inbox + SMTP send — an audited wrapper voice-Kael is pre-approved to call |
 | `lyrics-kael` | text-Kael + voice-Kael (per-request) | GPT-5.4 lyric generation for the Suno / music-taste-profile project — same pre-approval |
+
+**Finance-dashboard tooling** lives in a separate project directory `~/tools/finance-dashboard/` (its own git repo at `github.com/MaoTanx/finance-regime-dashboard`) — see §13. Its two launchd jobs (`com.kael.finance-dashboard` daemon + `com.kael.finance-dashboard-refresh` daily) invoke that project's `server.py` and `refresh.py` directly rather than shell wrappers in `~/bin/`.
 
 #### `~/bin/run-dreamer` — executable Python, no shell wrapper
 
@@ -2716,6 +2720,16 @@ Incremental additions on top of the 2026-04-20 rebuild:
 - **macOS TCC gotcha worth documenting**: Automation permission is granted per-executable in System Settings → Privacy & Security → Automation. A grant for Terminal does NOT cover `python3` when launchd spawns it directly. First launchd fire silently queues a TCC prompt for `python3.11` → Notes; user has to approve it via System Settings while the process is running. After initial grant, future launchd runs work without issue.
 - **Finance Regime Dashboard at `~/tools/finance-dashboard/`**: Tailscale-bound HTTP server on port 8788, always-on daemon + daily 05:30 refresh. 12 tiles across valuation / CapEx / macro / credit / earnings-split panels. Each tile is a standalone Python module under `panels/` exporting a `render()` that writes a PNG to `static/` + a sidecar JSON with formula + sources + current values + interpretation. Server renders a dashboard index page grouping tiles by category with inline descriptions. Sanity-checked by GPT-4o vision (caught and fixed a unit error in corporate-debt-to-GDP tile).
 - **New launchd jobs**: `com.kael.finance-dashboard` (always-on daemon, port 8788) + `com.kael.finance-dashboard-refresh` (daily 05:30 chart regeneration). Both added to kael-health dashboard's scheduler monitoring + arch-freshness watch list.
+- **Finance dashboard iterated through the rest of 2026-04-22**:
+  - Tile count grew from 12 to 17: added **VIX** (Panel 1d in Valuation — CBOE implied volatility, regime bands for calm/elevated/crisis), **Mag7 Net Debt/EBITDA** snapshot (Panel 4c — cross-sectional bar chart, negative values = net cash), **WTI + Henry Hub** dual-axis daily prices (Panel 6a), **US retail electricity + generation** with 12-month smoothing (Panel 6b). Panel 5 split into 5a (TTM level lines with YoY-at-Q4 annotations) and 5b (raw quarterly NI with YoY% labels, Rest-of-SPX dropped because it would be apples-to-oranges against genuine quarterly prints).
+  - Tile ordering reorganized per user flow: Valuation → Earnings by cohort → CapEx → Macro → Credit/Leverage → Energy.
+  - **GPT-5.4 validation pass** identified multiple methodology issues, all fixed in-place: (a) 1a percentile window widened from 25Y to full Shiller history since 1871, average lines separated by metric (~15.8× for trailing P/E, ~17.3× for CAPE); (b) 1b retitled "Trailing Earnings-Yield Spread vs 10Y Treasury" since it's a backward-looking proxy, not a forward ERP — interpretation corrected (negative readings also happened 2008-09 + COVID, not just 2000/today); (c) 1c cap removed on EPS growth so the 2010 base-effect spike is visible, median added alongside mean as historical reference; (d) 2c interpretation fixed (text previously said "below average" while plot showed above); (e) 4a scope honestly labeled since FRED public CSV only exposes 3Y of BAMLH0A0HYM2 without authenticated API; (f) 4b FRED series swapped from `NCBEILQ027S` (returned bogus 232% ratio from wrong unit interpretation) to `BCNSDODNS` (now ~45% of GDP, sensible).
+  - Each tile now carries a `definitions` metadata block in addition to `formula` and `sources` — term-by-term explanations for jargon (HY OAS, CAPE, earnings yield, SAAR, tight-vs-loose labor market, etc.). Rendered as expandable `<dl>` under "Formula + definitions + sources".
+  - **Public URL via Tailscale Funnel**: `https://dons-mac-mini.tail9e1438.ts.net/` exposes the dashboard publicly over HTTPS (Let's Encrypt cert auto-renewed by Tailscale). Kael-health intentionally NOT exposed — it stays tailnet-only because it shows system internals. Enablement required a one-time admin-console click at `https://login.tailscale.com/f/funnel?node=<node-id>` then `tailscale funnel --bg --https=443 http://127.0.0.1:8788`. Server bind changed from Tailscale-IP to `0.0.0.0` so the Funnel's loopback proxy target reaches it.
+  - **Cache-busting on chart URLs**: `server.py` appends `?v=<mtime>` to each `<img>` src based on the PNG's mtime. Prevents iOS Safari + home-screen PWAs serving stale charts after a refresh. HTML page is served with `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` + `Pragma: no-cache`. PNGs stay 1-hour-cached via `Cache-Control: public, max-age=3600` — cache is invalidated whenever the mtime changes, solving the "yesterday's chart stuck in browser" problem without killing image-caching efficiency.
+  - **Alert-on-failure** wired into `refresh.py`: if any panel `render()` fails during the 05:30 run, the script calls `~/bin/mail-kael send --to maotanx@gmail.com` with subject `[Kael] Finance dashboard refresh failed — N panel(s)` and a body listing panel names + error messages + log path. Silent on success. Tested end-to-end.
+  - **New credentials file**: `~/.claude/channels/eia/.env` (chmod 600, gitignored) for the US Energy Information Administration API key. Used by panel6_energy for WTI / Henry Hub / retail electricity / generation. `reference_eia_key.md` saved to auto-memory with load pattern.
+  - **Dedicated project repo**: `github.com/MaoTanx/finance-regime-dashboard` (private). Tracks Python code + `chatgpt_validation.md` snapshot. Regenerable data (`data/cache/` CSVs, `static/*.png` output, `static/*.json` sidecars) gitignored.
 
 - **Two new thin wrappers in `~/bin/`.** `mail-kael` (Gmail inbox/show/send via IMAP+SMTP) and `lyrics-kael` (GPT-5.4 lyric generation for the Suno/music-taste-profile project). Both are audited, narrow-surface Python wrappers that voice-Kael is explicitly pre-approved to call. See §9.2.
 - **VoiceKael permissions expanded.** `~/KaelVoice/.claude/settings.json` allowlist gained `Read(/Users/donpiano/tools/music-taste-profile/**)` (so voice-Kael can answer questions about the Suno project from memory) and `Bash(mail-kael *)` + `Bash(lyrics-kael *)`. The denylist tightened in parallel — language runtimes (`python`, `node`, `bun`, `npm`, `npx`, `uv`) explicitly denied so arbitrary code execution is closed even if a wrapper path were to leak. See §7.8 for the full current JSON.
@@ -2741,6 +2755,80 @@ Full-day debugging + rewrite after the dreamer silently stopped writing content.
 ### 2026-04-19 — Initial consolidated architecture
 
 First comprehensive write-up of the Kael setup. Superseded by the 2026-04-20 rewrite of the dreamer pipeline but broadly accurate on the Discord / VoiceKael / MCP / skills / hooks layers.
+
+---
+
+## 13. Finance Regime Dashboard
+
+Separate project at `~/tools/finance-dashboard/` — its own git repo at `github.com/MaoTanx/finance-regime-dashboard` (private). Built 2026-04-21 through 04-22 to answer the recurring "are we 2000 yet?" question via a persistent, daily-refreshing view of US equity valuation + Mag7 specifics + macro + credit.
+
+### 13.1 Scope and structure
+
+17 tiles across 6 groups:
+
+| Group | Tiles |
+|---|---|
+| Valuation | `1a` CAPE + trailing P/E (full Shiller history) · `1b` Trailing earnings-yield spread vs 10Y Treasury · `1c` SPX TTM EPS YoY growth · `1d` VIX |
+| Earnings by cohort | `5a` TTM level lines (Mag6 vs Tesla vs Rest-of-SPX) · `5b` Raw quarterly NI with YoY% |
+| CapEx | `2a` Mag7 quarterly CapEx stacked by company · `2b` Mag7 vs US PNFI (concentration share) · `2c` CapEx ROI proxies (1Y + 2Y payback) |
+| Macro | `3a` CPI YoY + Fed Funds · `3b` Unemployment + JOLTS · `3c` Real GDP QoQ SAAR + YoY |
+| Credit / Leverage | `4a` HY OAS credit spread · `4b` Non-financial corporate debt / GDP · `4c` Mag7 Net Debt / EBITDA snapshot |
+| Energy | `6a` WTI + Henry Hub dual-axis daily · `6b` US retail electricity + generation (12M smoothed) |
+
+### 13.2 Module layout
+
+```
+finance-dashboard/
+├── panels/
+│   ├── _shared.py                # design system + fetch helpers (dark-mode palette, annual ticks, etc.)
+│   ├── panel1_valuation.py       # 1a, 1b, 1c
+│   ├── panel1d_vix.py            # 1d
+│   ├── panel2_capex.py           # 2a, 2b, 2c
+│   ├── panel3_macro.py           # 3a, 3b, 3c
+│   ├── panel4_credit.py          # 4a, 4b
+│   ├── panel4c_mag7_leverage.py  # 4c
+│   ├── panel5_earnings_split.py  # 5a, 5b
+│   └── panel6_energy.py          # 6a, 6b
+├── data/cache/                   # fetched CSVs / HTMLs (gitignored, regenerable)
+├── static/                       # output PNGs + sidecar JSONs (gitignored)
+├── server.py                     # Tailscale-bound HTTP server on port 8788 + public Funnel :443
+├── refresh.py                    # Orchestrator — calls each panel's render(), emails on failure
+├── validate_with_chatgpt.py      # GPT-5.4 vision sanity-check over each tile
+└── README.md
+```
+
+Each panel module exposes a `render()` function that: fetches data (cached), builds one or more PNGs to `static/<tile_id>.png`, and writes a sidecar JSON with `title`, `formula`, `definitions`, `sources`, `current`, `interpretation`. The server renders the dashboard index page by inlining those JSON sidecars into tile cards.
+
+### 13.3 Data sources used
+
+- **Shiller / multpl.com** — CAPE, trailing P/E, SPX TTM EPS (full history since 1871)
+- **FRED** — DGS10 (10Y Treasury), CPIAUCSL (CPI), DFF (Fed Funds), UNRATE, JTSJOL, GDPC1, A191RL1Q225SBEA (GDP QoQ SAAR), BAMLH0A0HYM2 (HY OAS), BCNSDODNS (corporate debt), PNFI (private fixed investment), VIXCLS (VIX), GDP (nominal)
+- **Siblis Research** — S&P 500 year-end market cap (1998+)
+- **macrotrends.net** — per-ticker quarterly cash-flow statements (SEC 10-Q/10-K)
+- **Yahoo Finance** — ^GSPC quarterly prices for intra-year SPX scaling
+- **Financial Datasets API** — Mag7 balance sheet + income statement for leverage snapshot
+- **EIA (US Energy Information Administration)** — WTI, Henry Hub, retail electricity prices, generation
+
+Per tile, sources are explicitly named in the "Formula + definitions + sources" details block on the dashboard itself.
+
+### 13.4 Infrastructure
+
+- **Server**: `com.kael.finance-dashboard.plist`, Python `http.server` on port 8788, bound to `0.0.0.0` so both Tailscale IP and loopback work. `KeepAlive=true` auto-restarts on crash.
+- **Public URL**: Tailscale Funnel at `https://dons-mac-mini.tail9e1438.ts.net/` — free Let's Encrypt cert, public HTTPS, read-only dashboard. Config: `tailscale funnel --bg --https=443 http://127.0.0.1:8788`. Tailscale handles cert renewal + DDoS.
+- **Tailnet-only URL**: `http://dons-mac-mini.tail9e1438.ts.net:8788/` (or `http://<tailscale-ip>:8788/`) — same content, tailnet-scope.
+- **Daily refresh**: `com.kael.finance-dashboard-refresh.plist`, fires at **05:30 local time** via `StartCalendarInterval`. Runs `refresh.py` which iterates through every panel's `render()`, catches per-panel exceptions, writes `static/refresh_state.json` with status/timings. Exits cleanly; launchd resets for next day.
+- **Alert on failure**: if any panel fails, `refresh.py` calls `mail-kael send --to maotanx@gmail.com` with subject `[Kael] Finance dashboard refresh failed — N panel(s)`. Silent on success.
+- **Cache headers**: HTML served with `Cache-Control: no-store` + `Pragma: no-cache` + `Expires: 0` so Safari/PWAs always fetch fresh. PNG URLs cache-busted via `?v=<mtime>` appended in the index HTML — browser cache still works (1-hour PNG TTL) but invalidates on any chart update.
+- **Validation**: `validate_with_chatgpt.py` sends each tile's PNG + methodology to GPT-5.4 (via OpenAI API, vision mode). Collects per-tile critique to `static/chatgpt_validation.md`. Run on demand (not scheduled). Caught a real bug in 2026-04-22 corp-debt unit interpretation that would have silently served wrong numbers.
+- **Monitoring**: both launchd jobs are in `kael-health`'s `LAUNCHD_JOBS` tuple, so the health dashboard shows state + age-badge + last exit alongside dreamer/deep-dreamer/etc.
+
+### 13.5 Design decisions worth knowing
+
+- **Standalone charts per metric, not stacked panels.** Each tile gets its own PNG. Lets the dashboard lay out as a scrollable grid of tiles instead of one long stacked-subplot wall. Better for phone rendering + easier to add a tile without touching existing code.
+- **Per-tile sidecar JSON** (not a single manifest). Every panel writes `static/<id>.json` with metadata alongside the PNG. Server reads all sidecars on each page load. Allows individual tiles to update independently without coordination.
+- **Definitions are first-class metadata**, not comments. The `definitions` field is a dict of term → explanation, rendered as a `<dl>` in the expandable details section. Makes jargon discoverable without leaving the tile.
+- **Absolute-history percentiles** (since 1871 for Shiller data), not arbitrary 25-year windows — per GPT-5.4 validation feedback.
+- **Cache-bust on mtime**, not random version string. Ensures identical content → identical URL → browser cache works; different content → new URL → fresh fetch.
 
 ---
 
