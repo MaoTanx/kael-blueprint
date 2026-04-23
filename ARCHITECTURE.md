@@ -3,7 +3,7 @@ tags: [architecture, system, memory, voicekael]
 type: architecture
 confidence: confirmed
 created: 2026-04-19
-updated: 2026-04-22
+updated: 2026-04-23
 ---
 
 # Kael System Architecture
@@ -2705,6 +2705,16 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
 
+### 2026-04-23 — kael-health banner honesty, finance-dashboard CapEx source migration
+
+- **kael-health ALL GOOD banner now checks scheduler `last_exit` codes.** Previous overall_ok gate only counted launchd jobs with `state == "not loaded"`; a job that ran, crashed with rc≠0, and went back to "not running" was ignored by the banner (the per-row table was honest, but the top-level glance lied). Added `sched_failed = sum(1 for s in data["schedulers"] if s.get("last_exit") not in (None, "0"))` to the gate and surfaced the count inline in the glance line. Caught because `com.kael.finance-dashboard-refresh` showed LAST EXIT=1 while the banner still said "ALL GOOD".
+- **panel2_capex data source migrated from macrotrends.net to SEC EDGAR XBRL.** macrotrends started returning Cloudflare "Attention Required!" block pages to the curl-backed `fetch_cached` helper — all 7 cached HTML files came back as identical 5469-byte challenge pages, the `originalData` regex matched nothing, and `panel2_capex.render()` crashed on `q_dates[-1]` with an IndexError in the 05:30 refresh. Fixed by switching directly to the authoritative source macrotrends itself was scraping from — SEC's XBRL companyconcept JSON API. Added two helpers to `panels/_shared.py`:
+  - `sec_companyconcept(cik, concept, taxonomy="us-gaap", max_age_hours=24)` — cached fetcher that respects SEC's 10 req/sec limit via a contact-info `User-Agent`; returns None on 404 (concept not reported for that CIK).
+  - `sec_reconstruct_quarterly(usd_facts)` — most companies file cumulative-from-FY-start amounts in each 10-Q rather than QTD, so Q_n is recovered as `cumulative(n) − cumulative(n−1)` when consecutive end-dates span 80-100 days. Deduplicates by `(start, end)` preferring latest `filed` so amendments win. Also accepts direct QTD facts (what MSFT files) to fill gaps.
+  - `panel2_capex._load_mag7_data()` now pulls `PaymentsToAcquirePropertyPlantAndEquipment` + `PaymentsToAcquireProductiveAssets` per ticker and merges — AMZN switched tags in 2017, NVDA in 2020, and merging both concepts keeps the series continuous back to 2011. `NetIncomeLoss` has a single tag and works as-is.
+  - MAG7 tuple shape changed from `(ticker, slug, safe_slug)` to `(ticker, cik)`. Scale factor changed from `/1000` (macrotrends was in millions) to `/1e9` (SEC is in raw dollars).
+- **Lesson recorded**: when a third-party API that redistributes a primary source starts blocking or going stale, go to the primary source — SEC XBRL is free, structured, and authoritative for every US-listed company's financial statements. No reason to route through a scraper for public company filings.
+
 ### 2026-04-21 — Voice-Kael tool expansion, data-source attribution, dashboard UX, financial analysis tooling
 
 Incremental additions on top of the 2026-04-20 rebuild:
@@ -2804,7 +2814,7 @@ Each panel module exposes a `render()` function that: fetches data (cached), bui
 - **Shiller / multpl.com** — CAPE, trailing P/E, SPX TTM EPS (full history since 1871)
 - **FRED** — DGS10 (10Y Treasury), CPIAUCSL (CPI), DFF (Fed Funds), UNRATE, JTSJOL, GDPC1, A191RL1Q225SBEA (GDP QoQ SAAR), BAMLH0A0HYM2 (HY OAS), BCNSDODNS (corporate debt), PNFI (private fixed investment), VIXCLS (VIX), GDP (nominal)
 - **Siblis Research** — S&P 500 year-end market cap (1998+)
-- **macrotrends.net** — per-ticker quarterly cash-flow statements (SEC 10-Q/10-K)
+- **SEC EDGAR XBRL companyconcept API** — per-ticker quarterly CapEx and net income (direct from 10-Q/10-K filings, no scraping). Replaced macrotrends.net on 2026-04-23 after Cloudflare started blocking scrapes. Concepts: `us-gaap:PaymentsToAcquirePropertyPlantAndEquipment` + `us-gaap:PaymentsToAcquireProductiveAssets` (merged per ticker — AMZN + NVDA switched tags in 2017 / 2020), and `us-gaap:NetIncomeLoss`. Quarterly reconstruction via YTD-cumulative differencing handled in `panels/_shared.py::sec_reconstruct_quarterly`.
 - **Yahoo Finance** — ^GSPC quarterly prices for intra-year SPX scaling
 - **Financial Datasets API** — Mag7 balance sheet + income statement for leverage snapshot
 - **EIA (US Energy Information Administration)** — WTI, Henry Hub, retail electricity prices, generation
