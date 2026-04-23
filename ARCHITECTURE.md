@@ -282,6 +282,9 @@ Add missing fields. Don't overwrite existing ones. For existing notes missing `t
 ### 4b. Check for Buried Knowledge
 Scan daily notes for substantial insights (multi-paragraph explanations, decisions with reasoning, lessons learned) that should be standalone notes but are currently buried in the session log. Flag these for promotion — report the daily note path, the section heading, and a suggested standalone note title.
 
+### 4c. Detect Contradictions in Durable Memory
+Scan `~/.claude/projects/.../memory/feedback_*.md` / `reference_*.md` / `project_*.md` and the `~/KaelVault/People/*.md` notes for pairs of statements that contradict each other (same subject + same attribute + opposing claims). When found, add `contradicts: [[other-note]]` frontmatter to BOTH notes and surface the pair in the run report. **Strictly non-destructive — never pick a winner, never rewrite either note.** Guardrail: cap at 10 flags per run (more than that probably means the heuristic is too sensitive). Disagreements in tone / emphasis are not contradictions; only literally-incompatible statements.
+
 ### 5. Trim MEMORY.md
 Check ~/.claude/projects/-Users-<you>/memory/MEMORY.md:
 - Must stay under 200 lines
@@ -2560,6 +2563,16 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 ## 12. Changelog — architectural shifts
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
+
+### 2026-04-23 — contradiction detection in the deep-dreamer
+
+Follow-on from the second-round power-user audit (both research-explorer + GPT-5.4 flagged this as the #1 next move after today's earlier shipping). Vault crossed 280 notes today; silent contradictions between durable memory files are a real risk as durable memory keeps growing.
+
+Added **task 4c to the deep-dreamer spec**: scan `feedback_*.md` / `reference_*.md` / `project_*.md` auto-memory files and the three `People/*.md` notes for pairs with literally-incompatible claims on the same subject+attribute. Same-subject+same-attribute+opposing-claims is the match criterion; disagreements in tone/emphasis are explicitly NOT contradictions. When found, add `contradicts: [[other-note]]` frontmatter to BOTH notes and surface the pair (with quoted snippets + one-line justification) in the run report.
+
+**Strictly non-destructive.** The task never picks a winner, never rewrites either note's content, never deletes. The human decides which claim is still true. Guardrail: cap at 10 flags per run — anything more means the heuristic is too sensitive and needs tuning before the next run.
+
+Lives inside the daily 03:30 deep-dreamer cycle — zero new scheduler, zero new code path, just a prompt addition. Existing eval harness provides the safety net: any regression in the existing dreamer behavior from prompt bleed would be caught at the next weekly eval.
 
 ### 2026-04-23 — agent observability, SDK model-override fix, BM25 hybrid retrieval, expanded eval
 
