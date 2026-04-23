@@ -2567,7 +2567,7 @@ After reviewing GitHub traffic (small but real outside audience on `kael-bluepri
 - Tailscale hostname + tailnet ID (`<real-host>.<real-tailnet>.ts.net`) redacted to `<your-host>.<your-tailnet>.ts.net`. The tailnet ID was the biggest actual leak since it identifies the private network.
 - Discord user_id redacted to `<YOUR_DISCORD_USER_ID>` placeholder. Technically a non-secret, but pairing it with the "this ID is fully trusted" rule in the trust hierarchy was a social-engineering gift to anyone who impersonated a DM.
 - Personal Gmail address redacted to `<your-email>`.
-- Dota-analysis subagent section (3.3, 3.4) removed entirely — it's a hobby pipeline, not part of the core architecture. References in path lists, example tables, and cluster enumerations scrubbed to match.
+- Hobby-specific subagent pair (formerly §3.3 + §3.4) removed entirely — it was a domain-specific pipeline, not part of the core architecture. Related references in path lists, example tables, and cluster enumerations scrubbed to match.
 - Slovak diagram (`kael-architecture-diagram-sk.html`) removed from the public repo entirely; stays vault-only. It's a family-targeted artifact with personalized Slovak labels that don't belong in the public snapshot. `sync-blueprint` file-mapping updated to skip it.
 - Public `README.md` rewritten generic — no family-relation framing, no personal references.
 
