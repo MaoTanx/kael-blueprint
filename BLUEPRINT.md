@@ -1249,7 +1249,7 @@ Tailscale is the network auth — anyone in your tailnet can view, nobody else c
 
 ### 13.5 `~/bin/sync-blueprint`
 
-Shell script. Copies the three architecture docs from the private vault to `~/tools/kael-blueprint/` (renamed for public clarity: `kael-architecture-diagram-sk.html` → `architecture-diagram-sk.html`, `kael-blueprint-for-replication.md` → `BLUEPRINT.md`, `kael-architecture.md` → `ARCHITECTURE.md`). If any file changed, commits + pushes to `github.com/<you>/kael-blueprint` with a descriptive message. Idempotent — prints "nothing changed" if no diffs.
+Shell script. Copies the two public-facing architecture docs from the private vault to `~/tools/kael-blueprint/` (renamed for public clarity: `kael-blueprint-for-replication.md` → `BLUEPRINT.md`, `kael-architecture.md` → `ARCHITECTURE.md`). If any file changed, commits + pushes to `github.com/<you>/kael-blueprint` with a descriptive message. Idempotent — prints "nothing changed" if no diffs. The Slovak diagram (`kael-architecture-diagram-sk.html`) is deliberately kept vault-only; it's personalized for a family reader and not published.
 
 ### 13.6 `~/bin/mail-kael` — Gmail CLI wrapper
 
