@@ -2337,9 +2337,12 @@ All scheduling is launchd-driven (see §6). Each launchd plist calls ONE standal
 | `run-deep-dreamer` | `com.kael.deep-dreamer.plist` (daily `03:30`) | Vault maintenance: dedup, fix links, trim MEMORY.md |
 | `kael-health` | `com.kael.health.plist` (always-on daemon) | Serve the health dashboard on Tailscale-bound port 8787 |
 | `apple-notes-sync` | `com.kael.apple-notes.plist` (every 15 min) | Pull notes from iCloud "Kael-Sync" shared folder → `~/KaelVault/Work/AppleNotes/` |
-| `sync-blueprint` | manual / future-automated | Copy the 3 architecture docs from the private vault → the public `kael-blueprint` repo |
+| `sync-blueprint` | manual / future-automated | Copy the 2 public architecture docs from the private vault → the public `kael-blueprint` repo (Slovak diagram stays vault-only) |
 | `mail-kael` | text-Kael + voice-Kael (per-request) | Gmail IMAP inbox + SMTP send — an audited wrapper voice-Kael is pre-approved to call |
 | `lyrics-kael` | text-Kael + voice-Kael (per-request) | GPT-5.4 lyric generation for the Suno / music-taste-profile project — same pre-approval |
+| `vault-index` | `com.kael.vault-index.plist` (every 5 min) | Build/refresh the SQLite FTS5 BM25 index over the vault; `rebuild` / `update` / `stats` subcommands |
+| `vault-search` | text-Kael (per-query) | BM25 keyword search over the vault index — exact strings, names, numbers, acronyms. Complements Smart Connections (semantic). |
+| `dreamer-eval` | `com.kael.dreamer-eval.plist` (weekly Mondays 04:30) | 15-case regression suite for the dreamer. Runs the real agent in a sandboxed vault, rule-based scorer checks output |
 
 **Finance-dashboard tooling** lives in a separate project directory `~/tools/finance-dashboard/` (its own git repo at `github.com/MaoTanx/finance-regime-dashboard`) — see §13. Its two launchd jobs (`com.kael.finance-dashboard` daemon + `com.kael.finance-dashboard-refresh` daily) invoke that project's `server.py` and `refresh.py` directly rather than shell wrappers in `~/bin/`.
 
@@ -2557,6 +2560,20 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 ## 12. Changelog — architectural shifts
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
+
+### 2026-04-23 — agent observability, SDK model-override fix, BM25 hybrid retrieval, expanded eval
+
+Four tightly-connected changes from the same session, all following on from the power-user audit and the dreamer eval harness earlier in the day:
+
+- **Agent-level observability for dreamer runs.** `run-dreamer` now extracts full token usage from the SDK's `ResultMessage` and logs it per run: `agent success (<duration>ms, <N> turns, in=..., out=..., cache_read=..., cache_create=..., cost=$...)`. `kael-health` parses the richer log format and renders a per-run Tokens + Cost column, plus a 24-hour cost total and linear monthly projection under the dreamer-runs table. The glance banner stays un-inflated — observability lives in the section where it belongs.
+- **SDK model-override bug caught by the new observability.** The claude-agent-sdk `query()` path does NOT read the agent `.md` frontmatter's `model:` field — that field is only honored by the Task-dispatched subagent codepath. A dreamer spawned directly via `query()` was silently using the CLI's default model despite `model: haiku` in the frontmatter. Caught by noticing a 2.6-second "nothing to process" run cost $0.47 in `total_cost_usd` — far too high for Haiku at that token count. Fix: pass `model="claude-haiku-4-5"` explicitly in the `ClaudeAgentOptions` for both `run-dreamer` and the eval harness. Cost for an actual work-doing dreamer run dropped to ~$0.13. **Lesson captured: frontmatter controls subagent dispatch; explicit SDK options control `query()` dispatch. They are not interchangeable.**
+- **BM25 hybrid retrieval over the vault** (audit Item 5). Smart Connections is semantic-only and misses exact strings / names / numbers / acronyms — the queries that return bad hits every day. Added a parallel keyword-search layer that does not touch the Smart Connections plugin:
+  - **`~/bin/vault-index`** builds a SQLite FTS5 index at `~/KaelVault/.vault-search.db` (gitignored; 216 docs, ~2.8 MB at launch). Incremental via `vault-index update` (diffs mtime and size per file, re-indexes only the delta). `rebuild` for a clean slate. `stats` for a quick count. Zero external deps — FTS5 is built into macOS Python's sqlite3.
+  - **`~/bin/vault-search "<query>"`** runs FTS5 MATCH with `bm25()` ranking, returns top-K with snippets. Supports the full FTS5 syntax (`"exact phrase"`, `foo AND NOT bar`, `title:amazon`, `capex*`). `--json` for programmatic use.
+  - **`com.kael.vault-index.plist`** — launchd runs `vault-index update` every 5 minutes (and `RunAtLoad=true` for initial build). Added to `kael-health`'s `LAUNCHD_JOBS` tuple so the dashboard flags the index if it stalls.
+  - **No integration with Smart Connections.** The two indexes are parallel read-only sidecars. Kael chooses which to call: `vault-search` for exact-string lookups, `mcp__smart-connections__semantic_search` for conceptual queries. When in doubt, call both — divergence is the value.
+- **Dreamer eval harness expanded from 5 → 15 cases.** Added: contradiction/correction (06), deprecated-rule refinement (07), behavioral feedback about Kael (08), untrusted web content with embedded imperative instructions (09 — prompt-injection safety test), Current Tasks addition (10), multi-topic single message (11), financial-analysis session preserving DCF assumptions (12), retraction/apology (13), ambiguous request that got dropped (14 — guards against fabrication), and noise-only session (15 — queue-operation / attachment scaffolding only). Scorer gained a `current_tasks_mentions_all` rule for checking `Current Tasks.md` directly.
+- **Permissions allowlist seeded.** `~/.claude/settings.json` gained a `permissions.allow` block with 14 safe read-only entries (launchctl print/list, kael-health curl, vault-search, vault-index stats, crontab -l, claude plugin list/marketplace list, four Smart Connections MCP tools, Discord attachment download + fetch_messages). Reduces interactive permission prompts without widening the attack surface. Mutations, interpreters, and anything touching outbound network other than the local Tailscale dashboard intentionally excluded.
 
 ### 2026-04-23 — dreamer eval harness + Haiku routing
 
