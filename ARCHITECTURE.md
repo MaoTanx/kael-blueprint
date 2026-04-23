@@ -2558,6 +2558,19 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
 
+### 2026-04-23 — dreamer eval harness + Haiku routing
+
+After a power-user audit identified the dreamer as the highest operational-risk component (a silent prompt regression corrupts memory for days before anyone notices), added a regression test suite and switched the dreamer to a cheaper model now that the safety net exists:
+
+- **Dreamer eval harness** at `~/.claude/dreamer-eval/`. Five golden test cases covering the main dreamer behaviors: trivial chit-chat (should produce near-nothing), fact Q&A (figures preserved in daily note, no feedback memory created), explicit preference rule ("from now on..." → `feedback_*.md` file MUST be created), secret-leak test (token-shaped string MUST NOT appear in vault or commit messages), and project-fact-with-date (date must survive for future recall). Each case is a synthetic JSONL + criteria YAML.
+- **Sandboxed execution.** The orchestrator (`~/.claude/dreamer-eval/run.py`) builds a fresh isolated vault per case under `~/tools/dreamer-eval-sandbox/` — outside `~/.claude/` because Claude Code's sensitive-path protection blocks writes there even with `bypassPermissions`. Real `claude-agent-sdk` with the live `~/.claude/agents/dreamer.md` spec runs against the fixture; rule-based scorer then verifies vault state (required/forbidden text, new memory files counted, commit presence, no leaked strings).
+- **CLI wrapper**: `~/bin/dreamer-eval` (all cases), `dreamer-eval 03` for a single case prefix, `--keep` to preserve sandboxes on pass for inspection.
+- **Weekly schedule**: `com.kael.dreamer-eval.plist`, Mondays 04:30. Added to `kael-health`'s `LAUNCHD_JOBS` tuple.
+- **Health dashboard surfaces latest eval**: new "Dreamer eval — regression suite" panel shows pass/fail per case, elapsed, and failure reasons. The glance banner now reads `dreamer-eval: N/M` and the overall `ALL GOOD` gate flips to yellow on (a) any failed case or (b) an eval result older than 10 days (stale-coverage guard — silent test drift is as bad as silent dreamer drift).
+- **Banner fix along the way**: the earlier ALL-GOOD check flagged `(never exited)` launchd last-exit states as failures. Tightened the check to count only strictly-numeric non-zero exits — `(never exited)` / `(never run)` / similar sentinel strings from newly-loaded plists now correctly read as "not a failure, just hasn't run yet."
+
+- **Dreamer routed from Sonnet to Haiku.** With the eval harness as a safety net, the dreamer's `model:` frontmatter was switched. Haiku passed 5/5 cases on first run (including the secret-leak test — arguably the most sensitive). Wall-clock was also slightly faster (~57s/case vs ~65s on Sonnet). Cost per hourly run drops roughly 3-5x. If Haiku ever starts regressing on memory-extraction quality, the eval will catch it at the next Monday run (or sooner on manual invocation).
+
 ### 2026-04-23 — public-repo de-personalization pass
 
 After reviewing GitHub traffic (small but real outside audience on `kael-blueprint`), the public architecture docs were scrubbed of user-identifying detail:
