@@ -3,7 +3,7 @@ tags: [architecture, blueprint, replication]
 type: blueprint
 confidence: confirmed
 created: 2026-04-19
-updated: 2026-04-22
+updated: 2026-04-23
 ---
 
 # Personal AI Assistant — Blueprint for Replication
@@ -1242,6 +1242,8 @@ Structurally identical to `run-dreamer` but simpler — deep-dreamer is stateles
 ### 13.4 `~/bin/kael-health`
 
 Python HTTP server bound to the local Tailscale IP only (`tailscale ip -4` resolved at startup), port 8787. Read-only. Each GET gathers live data from local files: launchctl job state, last N dreamer runs from the log, git status of every tracked repo, cursor deltas, architecture-doc freshness (compares mtime of doc files against a watchlist of system ingredients), recent failures (grep last 24h of each log for ERROR/FATAL/BLOCKED). Renders as one HTML page with `<meta refresh="60">`.
+
+The top-level "ALL GOOD" banner gates on five signals: `sched_bad` (jobs with `state == "not loaded"`), `sched_failed` (jobs whose last exit code is non-zero), `dreamer_last_rc` (last dreamer run returned zero), `repos_unpushed` (any tracked repo with commits ahead of origin), and `docs_stale` (any watched ingredient mtime newer than the oldest architecture doc). Any of the five failing flips the banner to yellow and tells the reader to look at the colored rows below. Watching both the "loaded" state and the last-exit code is necessary — a job that ran, crashed with rc≠0, and went back to "not running" is still loaded, so a banner that only counted "not loaded" lies about failures that already happened.
 
 Tailscale is the network auth — anyone in your tailnet can view, nobody else can reach port 8787. On your phone, open the URL in Safari, tap share → Add to Home Screen.
 
