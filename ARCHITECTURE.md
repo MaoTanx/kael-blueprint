@@ -2616,6 +2616,10 @@ After reviewing GitHub traffic (small but real outside audience on `kael-bluepri
 
 Secret scan (pre-push): no tokens, API keys, passwords, or OAuth secrets found in any of the three docs. `README.md` already carried the "docs only, no tokens" disclaimer.
 
+### 2026-04-27 — kael-health banner: ignore in-flight dreamer
+
+- **kael-health ALL GOOD banner now ignores in-flight dreamer runs.** The hourly dreamer fires at :43 and runs ~90–250 s. While running, its `run end (rc=…)` line isn't in `dreamer.log` yet, so `last_agent_runs()` returns the most recent run with `rc=None`. The previous `overall_ok` gate had `dreamer_last_rc == 0`, which is False when rc is None — so every :43 hour the banner flickered yellow with "look at yellow/red below" for the duration of the run, even though nothing was wrong. Replaced with `dreamer_bad = (dreamer_last_rc is not None and dreamer_last_rc != 0)` and gated the banner on `not dreamer_bad`. The per-row table is unaffected (it still shows the in-flight row in its own colour scheme). Caught because Miro screenshotted a yellow banner whose summary line read `last dreamer rc=—` while every other signal was green.
+
 ### 2026-04-23 — kael-health banner honesty, finance-dashboard CapEx source migration
 
 - **kael-health ALL GOOD banner now checks scheduler `last_exit` codes.** Previous overall_ok gate only counted launchd jobs with `state == "not loaded"`; a job that ran, crashed with rc≠0, and went back to "not running" was ignored by the banner (the per-row table was honest, but the top-level glance lied). Added `sched_failed = sum(1 for s in data["schedulers"] if s.get("last_exit") not in (None, "0"))` to the gate and surfaced the count inline in the glance line. Caught because `com.kael.finance-dashboard-refresh` showed LAST EXIT=1 while the banner still said "ALL GOOD".
