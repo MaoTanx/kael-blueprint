@@ -1263,6 +1263,42 @@ Thin Python wrapper around an OpenAI `chat.completions` call (reference system u
 
 Same rationale as `mail-kael`: voice-Kael is blocked from `python` directly, so pre-approved wrappers are the permitted code-exec surface. Narrow, audited, and easy to replace or extend per-project.
 
+### 13.8 `~/bin/mail-watch` — periodic Gmail check that pings Discord on new human mail
+
+Standalone Python script (no external deps beyond stdlib + `imaplib` + `urllib`). Runs every 15 minutes via launchd. Two folders watched: `INBOX` and `[Gmail]/Spam` (because brand-new senders frequently land in Spam — the reference system found Suri's first hello there). Maintains a per-folder UID cursor at `~/.claude/state/mail-watch-cursor.json` so the same email isn't reported twice.
+
+**How it filters noise.** A static `NOISE_SENDERS` list catches the obvious automated stuff (`noreply@google.com`, `noreply@email.apple.com`, `suno@creators.suno.com`, `noreply@github.com`, etc.) plus generic patterns (`noreply@`, `do-not-reply@`, `mailer-daemon@`, `postmaster@`). A `SELF_SENDERS` list silences self-sent automation (the reference system's `maotanx@gmail.com` kael-health daily failure alerts). Anything that survives both filters is treated as human-origin mail and reported.
+
+**How it reports.** Posts to Discord via the bot's REST API directly: `POST https://discord.com/api/v10/channels/{CHANNEL_ID}/messages` with the bot token from `~/.claude/channels/discord/.env`. **No dependency on a running Claude Code session** — works from a launchd background process. The message format includes folder badge (📥 INBOX / 🗑️ SPAM), From, Subject, a 140-char preview line, attachment count if any, and the IMAP UID for traceability.
+
+**First-run cursor seeding.** On a fresh install, initialise the cursor with the current max UID per folder so the watcher doesn't spam the user with every existing email. The reference system did this with a one-liner before loading the launchd plist:
+
+```python
+# python3 -c "..."
+import imaplib, json, os
+from pathlib import Path
+env = {l.split('=',1)[0].strip(): l.split('=',1)[1].strip().strip('"') for l in
+       open(os.path.expanduser('~/.claude/channels/gmail/.env')) if '=' in l and not l.startswith('#')}
+m = imaplib.IMAP4_SSL("imap.gmail.com")
+m.login(env['GMAIL_ADDRESS'], env['GMAIL_APP_PASSWORD'])
+state = {}
+for folder in ["INBOX", '"[Gmail]/Spam"']:
+    m.select(folder, readonly=True)
+    typ, data = m.uid("search", None, "ALL")
+    uids = [int(x) for x in (data[0] or b"").split()] if typ == "OK" else []
+    state[folder] = max(uids) if uids else 0
+m.logout()
+p = Path.home() / ".claude/state/mail-watch-cursor.json"
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text(json.dumps(state, indent=2))
+```
+
+**launchd plist** (`com.kael.mail-watch.plist`): `StartInterval=900` (15 min), `RunAtLoad=false`, `LowPriorityIO=true`, `ProcessType=Background`, logs to `~/.claude/logs/mail-watch-launchd.{log,err}`.
+
+**Tracked by kael-health.** The job is in `LAUNCHD_JOBS`, the script + plist are in the architecture-doc freshness watchlist, and the description shown in the dashboard is *"Pings Discord on new human mail (15 min)"*. So a stale cursor or failed run shows up in the health pane.
+
+**Why not Gmail Push / Pub-Sub?** Lower setup cost. The 15-minute polling interval is fine for what the reference operator needs (the alert use-case is "tell me a human emailed me", not realtime). Gmail Push via Google Cloud Pub-Sub would need a GCP project, a service account, a watch renewal cron, and an HTTPS receiver — all replaceable by a 200-line stdlib polling script that ships with no external deps.
+
 ## 14. Scheduling — launchd only, no cron
 
 ### 14.1 Why launchd and not cron on macOS
@@ -1289,6 +1325,7 @@ Place at `~/Library/LaunchAgents/`, load with `launchctl load <path>`. All use `
 | `com.kael.auto-commit.plist` | `StartInterval=1800` (every 30 min) | `/Users/<you>/KaelVault/.auto-commit.sh` |
 | `com.kael.voicekael.plist` | `RunAtLoad=true`, `KeepAlive Crashed=true` (always on) | `/Users/<you>/KaelVoice/index.js` via node |
 | `com.kael.health.plist` | `RunAtLoad=true`, `KeepAlive=true` (always on) | `/Users/<you>/bin/kael-health` |
+| `com.kael.mail-watch.plist` | `StartInterval=900` (every 15 min) | `/Users/<you>/bin/mail-watch` |
 
 Each plist writes its stdout/stderr to `~/.claude/logs/<name>-launchd.{log,err}` so a failing launch leaves a visible trace. Inside the scripts, meaningful activity logs to `~/.claude/logs/<name>.log`.
 
