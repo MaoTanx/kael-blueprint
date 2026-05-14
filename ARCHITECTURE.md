@@ -2564,6 +2564,50 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
 
+### 2026-05-14 — Keychain fix for SSH/tmux sessions (`reattach-to-user-namespace`)
+
+Symptom: every morning Claude Code would greet with `Not logged in · Please run /login · Run in another terminal: security unlock-keychain`. Two days of theory-spiral (rate-limit theory — wrong; OAuth refresh-token race — possible but unproven; etc.). The actual cause turned out to be the canonical macOS-keychain-over-SSH problem: tmux servers started inside an SSH login session inherit the "remote" Mach bootstrap namespace, which has no access to the user's GUI keychain. Every shell tmux spawns therefore inherits "no keychain," and Claude Code (which stores its OAuth token in the keychain with `.credentials.json` as a fallback) sees a locked door and prints the misleading "Not logged in" message.
+
+**Fix:** `brew install reattach-to-user-namespace` + one line in `~/.tmux.conf`:
+
+```
+set-option -g default-command "reattach-to-user-namespace -l ${SHELL}"
+```
+
+Then `tmux kill-server` + start a fresh tmux. Each new shell inside tmux now jumps back into the Aqua user-session namespace before exec — keychain access works. Side benefits: also fixes `pbcopy`/`pbpaste` and `ssh-agent` forwarding in tmux. Apple-blessed mechanism, no security tradeoff — it just reconnects processes to the namespace the GUI login already created.
+
+The deeper lesson: **check the Anthropic `/usage` page first** before pursuing credential-debug theories. The Max-plan weekly cap and the keychain-over-SSH issue both present as "Not logged in" in the CLI but have completely different fixes.
+
+### 2026-05-13 — FT brief pipeline expansion: audio + auto-login + fact extraction
+
+Three sibling additions to the FT daily brief (now nearing production-grade reliability):
+
+- **Audio version** — `make_audio.py`: HTML → Opus rewrite (separate EN and SK prompts that produce flowing spoken prose with mandatory inter-article transition phrases) → Edge TTS (en-GB-RyanNeural + sk-SK-LukasNeural) → ~20-minute MP3 per language. Attached to the morning email alongside the PDFs.
+- **Auto-login** — `auto-refresh-bearer.py`: Playwright headless Chromium drives FT passwordless OTP login. Gmail IMAP polls for the access-code email, regex-extracts the 6-digit code, types it back. Crucial non-obvious detail: the FT→PressReader SSO redirect only fires when the *Europe edition link* on `/todaysnewspaper` is **clicked** (Playwright `el.click()` + `expect_page`), not when navigated via `page.goto()`. Direct URL navigation lands a guest JWT; the user-style click flow lands a subscriber JWT. PDPAuth cookie lifetime ~25 days, so a fresh login holds 3-4 weeks before re-auth.
+- **Fact extractor** — `extract_facts.py` + `ft-fact-extractor` agent: per-article structured-fact extraction into a SQLite DB plus a Markdown daily rollup. Strict 8-field schema (entity, metric, value, unit, direction, as_of_date, sentence_raw, confidence) enables time-series queries like "rupee/USD over 90 days" or "every Trump tariff announcement." Initial Opus implementation had ~45% article-failure rate from schema-noncompliance ("fact" instead of "sentence_raw", added "category"/"notes" fields); switching the agent to Sonnet (which respects rigid schemas better than Opus) + broadening the prompt's fact-type guidance + bumping body cap from 8K→16K chars pushed success rate to 55% with +33% facts captured. Remaining ~30% failures stem from both models still inventing fields despite explicit "don't" instructions — outstanding work, not silently masked in code.
+
+The full FT brief now ships PDFs (EN+SK), MP3s (EN+SK), and contributes structured facts to a queryable archive — all from a single 06:00 UTC launchd run.
+
+Three new sub-agents: `ft-summarizer` (Opus, editorial work), `ft-translator` (Opus, EN→SK with jargon preservation), `ft-fact-extractor` (Sonnet, schema-strict).
+
+### 2026-05-13 — Confidential files encryption infrastructure
+
+Following a request to handle a sensitive document "carefully — don't upload anywhere": a dedicated AES-256 + PBKDF2 encryption layer at `~/.claude/channels/confidential/`. Three small Python wrappers (`encrypt-pdf.py`, `encrypt-file.py`, `decrypt-file.py`) shell out to `openssl enc` with 100,000 PBKDF2 iterations. Master password lives in `.env` (mode 600, gitignored). Documents land in `files/<name>.enc`. Recovery story: master password in `.env`, original PDFs/extracts retained in chat/email as backup.
+
+The decision was to use a single master password rather than per-file passwords — same recovery surface, less ceremony, fits a "encrypted but accessible to my Mac mini under my login" pattern.
+
+### 2026-05-13 — Subagent-by-default skill pattern
+
+A new skill landed with frontmatter `context: fork`, `agent: general-purpose`, `model: claude-opus-4-7` — the first user skill to default to subagent execution rather than running inline on the main thread. Pattern validated on a live run: 142 Opus turns / 16.2M total tokens / $37 equivalent vs. an estimated ~$200 for the same work inline. The cost win comes from forked context (the subagent starts with only its task brief and skill body, no inherited conversation tail), not from a different model — both paths use Opus 4.7.
+
+Architecturally the lesson is that `context: fork` + an explicit `model:` override is the right pattern for any skill that does substantial work (multi-step research, multi-pass analysis, bulk extraction) and whose intermediate output doesn't need to be in main-thread context for the user to redirect mid-flight.
+
+Side effect: the per-subagent JSONL transcript at `~/.claude/projects/<proj>/<session>/subagents/agent-<id>.jsonl` gives an explicit token bill for every Agent invocation (input / cache_create / cache_read / output). This makes per-task accounting possible — and a related operational rule landed: search/grep/scan tasks go to an Explore subagent (Sonnet), not main-thread Opus, for ~14× cost reduction.
+
+### 2026-05-13 — `/goal` slash command awareness
+
+Anthropic shipped `/goal` to Claude Code (announced May 13 by `@ClaudeDevs`): a session-scoped Stop-hook-based mechanism where the user types `/goal <condition>` and Claude keeps working across turns until a small evaluator model (Haiku) confirms the condition is met against the transcript. Documented at https://code.claude.com/docs/en/goal. Replaces the DIY "verification-before-completion" pattern for one-shot runs with a built-in, fresh-model-evaluated alternative. Worth using for tasks with transcript-verifiable end states: queue draining, build/test loops, multi-pass research. Not worth using for exploratory work where you want to redirect intermediate output.
+
 ### 2026-04-23 — contradiction detection in the deep-dreamer
 
 Follow-on from the second-round power-user audit (both research-explorer + GPT-5.4 flagged this as the #1 next move after today's earlier shipping). Vault crossed 280 notes today; silent contradictions between durable memory files are a real risk as durable memory keeps growing.
