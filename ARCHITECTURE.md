@@ -2578,17 +2578,17 @@ Then `tmux kill-server` + start a fresh tmux. Each new shell inside tmux now jum
 
 The deeper lesson: **check the Anthropic `/usage` page first** before pursuing credential-debug theories. The Max-plan weekly cap and the keychain-over-SSH issue both present as "Not logged in" in the CLI but have completely different fixes.
 
-### 2026-05-13 — FT brief pipeline expansion: audio + auto-login + fact extraction
+### 2026-05-13 — Daily news brief pipeline expansion: audio + auto-login + fact extraction
 
-Three sibling additions to the FT daily brief (now nearing production-grade reliability):
+Three sibling additions to a daily news-source brief (now nearing production-grade reliability):
 
-- **Audio version** — `make_audio.py`: HTML → Opus rewrite (separate EN and SK prompts that produce flowing spoken prose with mandatory inter-article transition phrases) → Edge TTS (en-GB-RyanNeural + sk-SK-LukasNeural) → ~20-minute MP3 per language. Attached to the morning email alongside the PDFs.
-- **Auto-login** — `auto-refresh-bearer.py`: Playwright headless Chromium drives FT passwordless OTP login. Gmail IMAP polls for the access-code email, regex-extracts the 6-digit code, types it back. Crucial non-obvious detail: the FT→PressReader SSO redirect only fires when the *Europe edition link* on `/todaysnewspaper` is **clicked** (Playwright `el.click()` + `expect_page`), not when navigated via `page.goto()`. Direct URL navigation lands a guest JWT; the user-style click flow lands a subscriber JWT. PDPAuth cookie lifetime ~25 days, so a fresh login holds 3-4 weeks before re-auth.
-- **Fact extractor** — `extract_facts.py` + `ft-fact-extractor` agent: per-article structured-fact extraction into a SQLite DB plus a Markdown daily rollup. Strict 8-field schema (entity, metric, value, unit, direction, as_of_date, sentence_raw, confidence) enables time-series queries like "rupee/USD over 90 days" or "every Trump tariff announcement." Initial Opus implementation had ~45% article-failure rate from schema-noncompliance ("fact" instead of "sentence_raw", added "category"/"notes" fields); switching the agent to Sonnet (which respects rigid schemas better than Opus) + broadening the prompt's fact-type guidance + bumping body cap from 8K→16K chars pushed success rate to 55% with +33% facts captured. Remaining ~30% failures stem from both models still inventing fields despite explicit "don't" instructions — outstanding work, not silently masked in code.
+- **Audio version**: HTML → Opus rewrite (separate EN and SK prompts that produce flowing spoken prose with mandatory inter-article transition phrases) → Edge TTS (en-GB-RyanNeural + sk-SK-LukasNeural) → ~20-minute MP3 per language. Attached to the morning email alongside the PDFs.
+- **Auto-login**: Playwright headless Chromium drives passwordless OTP login. Gmail IMAP polls for the access-code email, regex-extracts the 6-digit code, types it back. Crucial non-obvious detail for SSO-style flows: the SSO redirect only fires when the target edition link is **clicked** (Playwright `el.click()` + `expect_page`), not when navigated via `page.goto()`. Direct URL navigation lands a guest JWT; the user-style click flow lands a subscriber JWT. Auth cookies hold ~25 days, so a fresh login lasts 3-4 weeks before re-auth.
+- **Fact extractor**: per-article structured-fact extraction into a SQLite DB plus a Markdown daily rollup. Strict 8-field schema (entity, metric, value, unit, direction, as_of_date, sentence_raw, confidence) enables time-series queries like "rupee/USD over 90 days" or "every Trump tariff announcement." Initial Opus implementation had ~45% article-failure rate from schema-noncompliance ("fact" instead of "sentence_raw", added "category"/"notes" fields); switching the agent to Sonnet (which respects rigid schemas better than Opus) + broadening the prompt's fact-type guidance + bumping body cap from 8K→16K chars pushed success rate to 55% with +33% facts captured. Remaining ~30% failures stem from both models still inventing fields despite explicit "don't" instructions — outstanding work, not silently masked in code.
 
-The full FT brief now ships PDFs (EN+SK), MP3s (EN+SK), and contributes structured facts to a queryable archive — all from a single 06:00 UTC launchd run.
+The pipeline now ships PDFs (EN+SK), MP3s (EN+SK), and contributes structured facts to a queryable archive — all from a single 06:00 UTC launchd run.
 
-Three new sub-agents: `ft-summarizer` (Opus, editorial work), `ft-translator` (Opus, EN→SK with jargon preservation), `ft-fact-extractor` (Sonnet, schema-strict).
+Three new sub-agents support the chain: summarizer (Opus, editorial work), translator (Opus, EN→SK with jargon preservation), and fact-extractor (Sonnet, schema-strict).
 
 ### 2026-05-13 — Confidential files encryption infrastructure
 
