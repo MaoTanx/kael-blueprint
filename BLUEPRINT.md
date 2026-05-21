@@ -581,6 +581,16 @@ Template:
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/inject_comm_wish.py"
+          }
+        ]
+      }
     ]
   }
 }
@@ -620,7 +630,7 @@ If you want tighter restrictions for a specific project directory (Claude Code r
 
 ---
 
-## 10. Hooks — the Discord reply enforcer
+## 10. Hooks — runtime invariants
 
 Hooks are shell commands fired by the Claude Code runtime at lifecycle points (PreCompact, Stop, UserPromptSubmit, etc.). They're the only way to enforce behaviors the model might skip, because the harness runs them, not the model.
 
@@ -630,6 +640,8 @@ Don't add hooks for everything. The reference system started with 4 separate hoo
 - PreCompact reminders are unnecessary — session transcripts are append-only on disk, nothing is lost at context compaction.
 - Stop reminders to spawn the dreamer are redundant with the hourly launchd job that runs anyway.
 - UserPromptSubmit embeddings (for proactive domain context) add ~50-100 ms latency on every prompt; rarely worth it unless you have many well-tuned domain clusters.
+
+A second hook was added later (May 2026), but for a fundamentally different purpose — re-injecting a small slice of the user's communication preferences into the model's context window on every turn (§10.3). This is enforcement of a rule, not retrieval-augmented context. The principle holds: only hook what the model consistently gets wrong without it.
 
 Keep only hooks that enforce a real behavioral rule the model consistently gets wrong without them.
 
@@ -801,7 +813,67 @@ Make it executable:
 chmod +x ~/.claude/hooks/discord_reply_check.py
 ```
 
-### 10.3 Why a hook and not just a rule
+### 10.3 `inject_comm_wish.py` — communication-rule re-injection
+
+The rule: a small block of communication preferences in CLAUDE.md (`## Communication`) — answer only what was asked, drop unrequested ideas, stay natural — decays in salience over a long conversation. It loads once at session start as part of the system prompt; by turn 50, it's competing with thousands of tokens of tool results and intermediate reasoning. The model drifts back toward verbose defaults.
+
+The fix: re-inject the block silently on every user turn via `UserPromptSubmit`. The hook reads the section out of CLAUDE.md fresh each turn (so edits propagate), wraps it in a `<communication-wish source="CLAUDE.md">` tag, and prints it to stdout, where Claude Code appends it to the user's prompt as additional context.
+
+Install at `~/.claude/hooks/inject_comm_wish.py`:
+
+```python
+#!/usr/bin/env python3
+"""UserPromptSubmit hook: silently re-inject the Communication section of
+~/CLAUDE.md as additional context on every user turn.
+
+Reads the `## Communication` block dynamically so edits to CLAUDE.md
+propagate without touching this script. Silent on any failure — never
+breaks a turn.
+"""
+import re
+import sys
+from pathlib import Path
+
+CLAUDE_MD = Path.home() / "CLAUDE.md"
+
+
+def extract_communication_block(text: str) -> str:
+    match = re.search(
+        r"^## Communication\s*\n(.+?)(?=\n## |\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    return match.group(1).strip() if match else ""
+
+
+try:
+    block = extract_communication_block(CLAUDE_MD.read_text(encoding="utf-8"))
+    if block:
+        sys.stdout.write(
+            "<communication-wish source=\"CLAUDE.md\">\n"
+            f"{block}\n"
+            "</communication-wish>\n"
+        )
+except Exception:
+    pass
+
+sys.exit(0)
+```
+
+Make it executable:
+
+```bash
+chmod +x ~/.claude/hooks/inject_comm_wish.py
+```
+
+Design notes:
+- **No judge.** Earlier design iterations proposed an LLM judge that would score replies against feedback rules; rejected — judge models add latency, can't be smaller than Sonnet 4.6 without losing nuance, and turn drift into a post-hoc redo problem.
+- **No taxonomy.** Don't try to enumerate every rule. CLAUDE.md is the single source of truth; the hook just keeps a slice of it adjacent to the latest user message.
+- **No length triggers.** Long replies are fine when explicitly asked for. The hook fires on every turn unconditionally.
+- **Silent failure.** If CLAUDE.md is missing or the section can't be parsed, exits 0 without injecting anything.
+- **Scope choice.** Only the `## Communication` section is mirrored, not all of CLAUDE.md — the other sections (Identity, Autonomy, Security, etc.) are general policy and don't suffer the same salience decay over a single conversation.
+
+### 10.4 Why a hook and not just a rule
 
 Rules in CLAUDE.md and auto-memory work until they don't. The model can forget under long-context pressure, or get distracted by the current task, or drop tool calls that aren't in the path of the immediate question. The hook is a runtime invariant that re-surfaces the rule as a block signal just before the turn would otherwise end. Non-negotiable.
 

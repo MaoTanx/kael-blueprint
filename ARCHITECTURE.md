@@ -566,13 +566,15 @@ These ship with the `claude` CLI itself and are always available:
 
 Hooks live in `~/.claude/settings.json`. They're shell commands fired by the Claude Code runtime at specific lifecycle points. They cannot be expressed as behavioral rules in CLAUDE.md or memory — the harness, not the model, executes them, so the model has no agency over whether they run.
 
-Current state: **one active hook.** The system was pruned from 4 separate hook actions down to 1 during the 2026-04-19 cleanup after several were determined to be redundant or net-negative:
+Current state: **two active hooks.** The system was pruned from 4 separate hook actions down to 1 during the 2026-04-19 cleanup after several were determined to be redundant or net-negative:
 
 - PreCompact dreamer reminder — removed. Session JSONL on disk is append-only and unaffected by in-memory context compaction; nothing is lost at compaction time for the dreamer to rescue.
 - Stop dreamer reminder — removed. Redundant with the hourly launchd job.
 - UserPromptSubmit `domain_recall.py` — removed. ~50-100 ms latency on every prompt, rare hits at current domain-summary coverage, net-negative ROI. Script file kept on disk for easy re-enable.
 
-Only the Discord reply check remains, because it enforces a real behavioral rule the model consistently forgets, not a defensive reminder.
+On 2026-05-21 a second UserPromptSubmit hook (`inject_comm_wish.py`, §5.2) was added — but for a different purpose than `domain_recall.py` had. It's not retrieval; it's rule re-injection, mirroring a small slice of CLAUDE.md (`## Communication`) into context on every turn to counter salience decay. Same lifecycle point, opposite design intent.
+
+Both active hooks enforce real behavioral rules the model consistently forgets, not defensive reminders or speculative retrieval.
 
 ### 5.1 Stop hook — Discord reply check
 
@@ -726,6 +728,60 @@ Design notes:
 - **Fault-tolerant.** Swallows JSON parse errors and returns 0 so broken lines don't block forever.
 - **Forward-compatible.** `DISCORD_MARKERS` includes both the current and legacy source strings.
 - **Dual-signal block.** Emits the `decision: block` JSON AND returns exit code 2 so runtimes keying off either signal agree.
+
+### 5.2 UserPromptSubmit hook — communication wish injection
+
+Fires on every user prompt submission, including each inbound Discord message routed through the plugin. Reads the `## Communication` section out of `~/CLAUDE.md` fresh each turn, wraps it in a `<communication-wish source="CLAUDE.md">` tag, and prints it to stdout — Claude Code appends that text to the user's prompt as additional context, silently.
+
+The problem it solves: a small block of communication preferences in CLAUDE.md ("answer only what was asked," "drop unrequested ideas," "stay natural") loads once at session start as part of the system prompt. By turn 50 of a long conversation, those rules are competing with thousands of tokens of tool results, skill content, and intermediate reasoning. Salience decays; the model drifts back toward verbose defaults. The hook keeps the rules adjacent to the user's most recent message every turn, where attention weight is highest.
+
+Full source of `~/.claude/hooks/inject_comm_wish.py`:
+
+```python
+#!/usr/bin/env python3
+"""UserPromptSubmit hook: silently re-inject the Communication section of
+~/CLAUDE.md as additional context on every user turn.
+
+Reads the `## Communication` block dynamically so edits to CLAUDE.md
+propagate without touching this script. Silent on any failure — never
+breaks a turn.
+"""
+import re
+import sys
+from pathlib import Path
+
+CLAUDE_MD = Path.home() / "CLAUDE.md"
+
+
+def extract_communication_block(text: str) -> str:
+    match = re.search(
+        r"^## Communication\s*\n(.+?)(?=\n## |\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    return match.group(1).strip() if match else ""
+
+
+try:
+    block = extract_communication_block(CLAUDE_MD.read_text(encoding="utf-8"))
+    if block:
+        sys.stdout.write(
+            "<communication-wish source=\"CLAUDE.md\">\n"
+            f"{block}\n"
+            "</communication-wish>\n"
+        )
+except Exception:
+    pass
+
+sys.exit(0)
+```
+
+Design notes:
+- **No judge model.** Earlier design iterations proposed an LLM judge that would score outgoing replies against feedback rules. Rejected — Haiku is too lossy to judge nuance, Sonnet+ adds material latency on every turn, and either way drift becomes a post-hoc redo problem instead of being prevented at generation time.
+- **No rule taxonomy.** Don't try to enumerate every preference. CLAUDE.md is the single source of truth; this hook mirrors a slice of it. Adding more rules means editing CLAUDE.md, not the hook.
+- **No length triggers.** Long replies are fine when explicitly asked for. The hook fires unconditionally; the model decides whether the current question warrants brevity or depth, with the rules right next to the question.
+- **Silent failure.** If CLAUDE.md is missing, unreadable, or the `## Communication` heading can't be found, the hook exits 0 with no output. Never blocks a turn over an error.
+- **Scope choice.** Only the `## Communication` section is mirrored, not all of CLAUDE.md. Other sections (Identity, Autonomy, Security, Verification) are general policy and don't suffer the same salience decay over a single conversation. Adding them would mostly add token noise.
 
 ## 6. Scheduling — launchd
 
@@ -2253,12 +2309,22 @@ Claude Code merges settings in this order (later wins for most fields; permissio
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/inject_comm_wish.py"
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Single active hook: Discord reply enforcement. See §5.
+Two active hooks: Discord reply enforcement (§5.1) and communication-wish re-injection (§5.2).
 
 ### 8.2 `~/.claude/settings.local.json` (user-local)
 
@@ -2564,7 +2630,43 @@ Things identified as imperfect, deliberately not fixed. Tracked for future work.
 
 Short record of major evolutions so readers can tell *when* the system crystallized into its current shape. For the day-by-day detail, see the Daily notes and the `System/` directory.
 
-### 2026-05-14 — Keychain fix for SSH/tmux sessions (`reattach-to-user-namespace`)
+### 2026-05-15 — Keychain fix CORRECTED: audit session, not bootstrap namespace
+
+The 2026-05-14 entry below is **superseded** — the `reattach-to-user-namespace` fix addressed the wrong layer of macOS. Symptoms were identical so the misdiagnosis stuck for a day.
+
+**Actual root cause:** every macOS process belongs to an *audit session* identified by an `asid`. The GUI console login creates the **Aqua session**; each SSH login creates its own separate audit session. The keychain binding is attached to the Aqua session — processes in other audit sessions can see the keychain file but the Security framework refuses to hand back unlocked items, returning `User interaction is not allowed` because it would need to prompt for authorization and there's no GUI to prompt into.
+
+The previous tmux server had been started from inside an SSH login session, so the server — and every shell + Claude Code instance underneath it — inherited that SSH audit session forever. `reattach-to-user-namespace` operates on the *Mach bootstrap namespace*, which is a related-but-separate layer of macOS session state. It didn't change the audit session, so it didn't fix the keychain binding.
+
+**Actual fix — start the tmux server from the Aqua console session, attach from SSH afterwards:**
+
+```
+# At the Mac's keyboard, in Terminal.app (NOT over SSH):
+tmux kill-server                  # nuke any old server stuck in the wrong session
+tmux new -s claude                # new server inherits asid = Aqua
+
+# From anywhere over SSH afterwards:
+tmux attach -t claude
+```
+
+The tmux *server's* audit session is sticky — once it's in Aqua, every child shell (including Claude Code) inherits Aqua keychain access permanently. SSH clients can attach without breaking the binding, because attaching only adds a tmux *client* process at the client end; the server's shells stay in their original session.
+
+Verification:
+```
+launchctl print pid/$(pgrep -x tmux) | grep asid
+# → expect the Aqua asid (the one from `launchctl print gui/$(id -u) | grep asid`)
+
+security show-keychain-info ~/Library/Keychains/login.keychain-db
+# → expect "Keychain ... no-timeout", NOT "User interaction is not allowed"
+```
+
+**Persistence across reboots:** the tmux server dies when the machine reboots. To auto-recreate it in the Aqua session, install a LaunchAgent at `~/Library/LaunchAgents/com.kael.tmux.plist` running `tmux new -d -s claude` at `RunAtLoad`. LaunchAgents under `~/Library/LaunchAgents/` run inside the GUI login session by definition, so they inherit Aqua automatically.
+
+**Cleanup applied:** `brew uninstall reattach-to-user-namespace`; removed the `set-option -g default-command "..."` line from `~/.tmux.conf`. The package was a 2012-era workaround for a pasteboard/namespace issue Apple fixed around 10.11; modern macOS handles pasteboard/keychain natively from tmux. `set -g mouse on` stays (unrelated scroll fix).
+
+**Deeper lesson:** when a fix "seems to work" but you can't articulate the mechanism precisely, you've probably patched a symptom. The 2026-05-14 "fix" was actually inert — what kept things working was manually running `security unlock-keychain` each session. Always confirm the mechanism, not just the outcome.
+
+### 2026-05-14 — Keychain fix for SSH/tmux sessions (`reattach-to-user-namespace`) — SUPERSEDED 2026-05-15
 
 Symptom: every morning Claude Code would greet with `Not logged in · Please run /login · Run in another terminal: security unlock-keychain`. Two days of theory-spiral (rate-limit theory — wrong; OAuth refresh-token race — possible but unproven; etc.). The actual cause turned out to be the canonical macOS-keychain-over-SSH problem: tmux servers started inside an SSH login session inherit the "remote" Mach bootstrap namespace, which has no access to the user's GUI keychain. Every shell tmux spawns therefore inherits "no keychain," and Claude Code (which stores its OAuth token in the keychain with `.credentials.json` as a fallback) sees a locked door and prints the misleading "Not logged in" message.
 
